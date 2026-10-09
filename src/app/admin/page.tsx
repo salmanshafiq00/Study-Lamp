@@ -11,7 +11,8 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
-import { listUsers, setUserStatus } from "@/lib/firestore/users";
+import { getAdminUserCounts, listUsersPage, setUserStatus } from "@/lib/firestore/users";
+import type { QueryDocumentSnapshot } from "firebase/firestore";
 import type { UserProfile } from "@/types";
 import { Search, ShieldOff, ShieldCheck, ExternalLink } from "lucide-react";
 import { toast } from "sonner";
@@ -37,11 +38,36 @@ function AllUsersContent() {
   const [query, setQuery] = React.useState("");
   const [pendingUid, setPendingUid] = React.useState<string | null>(null);
 
+  const [totalUsers, setTotalUsers] = React.useState<number | null>(null);
+  const [cursor, setCursor] = React.useState<QueryDocumentSnapshot | null>(null);
+  const [loadingMore, setLoadingMore] = React.useState(false);
+
+  // P2: one page of 25 users + a cheap COUNT query for the total, instead of reading every user document.
   const load = React.useCallback(async () => {
     setLoading(true);
-    setUsers(await listUsers());
-    setLoading(false);
+    try {
+      const [page, counts] = await Promise.all([listUsersPage(), getAdminUserCounts()]);
+      setUsers(page.users);
+      setCursor(page.cursor);
+      setTotalUsers(counts.totalUsers);
+    } finally {
+      setLoading(false);
+    }
   }, []);
+
+  async function loadMore() {
+    if (!cursor) return;
+    setLoadingMore(true);
+    try {
+      const page = await listUsersPage(undefined, cursor);
+      setUsers((prev) => [...prev, ...page.users]);
+      setCursor(page.cursor);
+    } catch {
+      toast.error("Couldn't load more users.");
+    } finally {
+      setLoadingMore(false);
+    }
+  }
 
   React.useEffect(() => { load(); }, [load]);
 
@@ -69,7 +95,7 @@ function AllUsersContent() {
       <div className="mx-auto max-w-4xl space-y-6">
         <div>
           <h1 className="font-display text-2xl font-semibold">All Users</h1>
-          <p className="text-sm text-muted-foreground">{users.length} registered users — find, enable/disable, or open a user&apos;s details.</p>
+          <p className="text-sm text-muted-foreground">{totalUsers ?? users.length} registered users — find, enable/disable, or open a user&apos;s details.</p>
         </div>
 
         <div className="relative max-w-sm">
@@ -132,6 +158,12 @@ function AllUsersContent() {
             </table>
           </div>
         </Card>
+
+        {!loading && cursor && (
+          <div className="flex justify-center">
+            <Button variant="outline" size="sm" onClick={loadMore} disabled={loadingMore}>{loadingMore ? "Loading…" : "Load more users"}</Button>
+          </div>
+        )}
 
         {!loading && filtered.length === 0 && (
           <p className="rounded-lg border border-dashed border-border py-10 text-center text-sm text-muted-foreground">No users match &quot;{query}&quot;.</p>

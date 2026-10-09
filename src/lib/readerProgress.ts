@@ -120,3 +120,19 @@ export function describeReaderProgress(progress: ReaderProgressInput | null | un
   }
   return `Page ${normalized.lastPage}`;
 }
+
+/**
+ * P3: is `next` far enough from the last saved position to be worth a write? One page, a 5 % zoom step (0.05),
+ * another sheet, 20 rows, or 5 % of a Word document. Small drift is saved only when the reader flushes (leave/hide).
+ */
+export function isSignificantReaderProgress(last: ReaderProgressInput, next: ReaderProgressInput): boolean {
+  const differs = (a: number | undefined, b: number | undefined, delta: number) =>
+    (a === undefined) !== (b === undefined) || (a !== undefined && b !== undefined && Math.abs(a - b) >= delta);
+  return (
+    differs(last.lastPage, next.lastPage, 1) ||
+    differs(last.zoom, next.zoom, 0.05) ||
+    differs(last.sheetIndex, next.sheetIndex, 1) ||
+    differs(last.rowIndex, next.rowIndex, 20) ||
+    differs(last.scrollRatio, next.scrollRatio, 0.05)
+  );
+}

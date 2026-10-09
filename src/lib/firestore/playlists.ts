@@ -1,7 +1,7 @@
 import {
   addDoc, collection, deleteDoc, doc, getDoc, getDocs, increment,
-  orderBy, query, serverTimestamp, updateDoc, writeBatch,
-} from "firebase/firestore";
+  limit, orderBy, query, serverTimestamp, updateDoc, writeBatch,
+} from "@/lib/firestore/instrumented";
 import { db } from "@/lib/firebase";
 import type { Playlist, Video } from "@/types";
 
@@ -9,7 +9,7 @@ const playlistsCol = () => collection(db, "playlists");
 const videosCol = (playlistId: string) => collection(db, "playlists", playlistId, "videos");
 
 export async function listPlaylists(includeArchived = false): Promise<Playlist[]> {
-  const snap = await getDocs(playlistsCol());
+  const snap = await getDocs(query(playlistsCol(), limit(100)));
   const all = snap.docs.map((d) => ({ id: d.id, ...d.data() }) as Playlist);
   return includeArchived ? all : all.filter((p) => p.visibility !== "archived");
 }

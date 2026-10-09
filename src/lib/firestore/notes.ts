@@ -1,4 +1,4 @@
-import { deleteDoc, deleteField, doc, getDoc, serverTimestamp, setDoc } from "firebase/firestore";
+import { deleteDoc, deleteField, doc, getDoc, serverTimestamp, setDoc } from "@/lib/firestore/instrumented";
 import { db } from "@/lib/firebase";
 import { normalizeNoteContent } from "@/lib/noteUtils";
 import { needsMigration, normalizeSummaryContent } from "@/lib/richText";

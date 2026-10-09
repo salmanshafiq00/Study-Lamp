@@ -3,6 +3,7 @@ import { adminDb } from "@/lib/server/firebase-admin";
 import { logServerError } from "@/lib/server/logError";
 import { withAuthedRoute } from "@/lib/server/routeHelpers";
 import { removeThumbnailIfUnreferenced } from "@/lib/server/driveThumbnailPrune";
+import { realBlobDeps } from "@/lib/server/blobRouteDeps";
 
 interface RouteParams {
   params: { id: string };
@@ -44,6 +45,9 @@ export const DELETE = withAuthedRoute<RouteParams["params"]>(async ({ uid, param
     await Promise.allSettled([
       userRef.collection("summaries").doc(`d_${documentId}`).delete(),
       userRef.collection("notes").doc(`d_${documentId}`).delete(),
+      // P4: trash this document's Drive blobs (never a hard delete) and drop their pointers.
+      realBlobDeps.del(uid, "annotations", documentId),
+      realBlobDeps.del(uid, "doctext", documentId),
       // The server-only thumbnail goes too, unless another record still uses the same Drive file.
       typeof driveFileId === "string" && typeof driveConnectionId === "string"
         ? removeThumbnailIfUnreferenced(uid, driveConnectionId, driveFileId)

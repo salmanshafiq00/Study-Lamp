@@ -1,7 +1,8 @@
 import {
-  collection, doc, getDoc, getDocs, serverTimestamp, setDoc, updateDoc, writeBatch,
-} from "firebase/firestore";
+  collection, doc, getDoc, getDocs, limit, query, serverTimestamp, setDoc, updateDoc, writeBatch,
+} from "@/lib/firestore/instrumented";
 import { db } from "@/lib/firebase";
+import { cachedRead, invalidate } from "@/lib/readCache";
 import type { PriorityLevel, UserVideoState, WatchStatus } from "@/types";
 
 const statesCol = (uid: string) => collection(db, "users", uid, "videoStates");
@@ -23,11 +24,14 @@ export function emptyState(videoId: string, playlistId: string): UserVideoState 
   };
 }
 
+/** Cached for 5 minutes; every write in this file invalidates it (P2). Reads are bounded by the cap below. */
 export async function getAllUserVideoStates(uid: string): Promise<Record<string, UserVideoState>> {
-  const snap = await getDocs(statesCol(uid));
-  const map: Record<string, UserVideoState> = {};
-  snap.docs.forEach((d) => (map[d.id] = d.data() as UserVideoState));
-  return map;
+  return cachedRead(`videoStates:${uid}`, 5 * 60_000, async () => {
+    const snap = await getDocs(query(statesCol(uid), limit(2000)));
+    const map: Record<string, UserVideoState> = {};
+    snap.docs.forEach((d) => (map[d.id] = d.data() as UserVideoState));
+    return map;
+  });
 }
 
 export async function getUserVideoState(uid: string, videoId: string): Promise<UserVideoState | null> {
@@ -36,6 +40,7 @@ export async function getUserVideoState(uid: string, videoId: string): Promise<U
 }
 
 async function upsert(uid: string, videoId: string, playlistId: string, patch: Partial<UserVideoState>) {
+  invalidate(`videoStates:${uid}`);
   await setDoc(
     stateDoc(uid, videoId),
     { videoId, playlistId, ...patch, updatedAt: serverTimestamp() },
@@ -92,6 +97,7 @@ export async function reorderPersonalList(
   field: "watchLaterOrder" | "priorityOrder",
   indices?: number[]
 ) {
+  invalidate(`videoStates:${uid}`);
   const batch = writeBatch(db);
   orderedVideoIds.forEach((videoId, i) => {
     const index = indices ? indices[i] : i;
@@ -106,6 +112,7 @@ export async function bulkUpdateStates(
   playlistIdByVideo: Record<string, string>,
   patch: Partial<UserVideoState>
 ) {
+  invalidate(`videoStates:${uid}`);
   const batch = writeBatch(db);
   videoIds.forEach((videoId) => {
     batch.set(

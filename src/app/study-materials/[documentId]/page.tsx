@@ -39,7 +39,7 @@ function StudyMaterialDetailContent() {
   const [streamError, setStreamError] = React.useState<string | null>(null);
   const study = useDocumentStudy(user, documentId, doc);
   const { setSummary, setNote, setNotePageNumber } = study;
-  const { annotations, setAnnotations, queueReaderProgress, queueAnnotationSave } = useDocumentProgress(user, doc);
+  const { annotations, setAnnotations, annotationStatus, queueReaderProgress, queueAnnotationSave } = useDocumentProgress(user, doc);
 
   React.useEffect(() => {
     (async () => {
@@ -187,6 +187,7 @@ function StudyMaterialDetailContent() {
               onPageJumpHandled={() => setRequestedPage(null)}
               onProgress={queueReaderProgress}
               onAnnotationsChange={queueAnnotationSave}
+              annotationStatus={annotationStatus}
               onExplainPage={study.handleExplainPage}
             />
           </section>

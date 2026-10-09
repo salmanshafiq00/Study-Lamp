@@ -1,4 +1,4 @@
-import { deleteDoc, doc, getDoc, serverTimestamp, setDoc } from "firebase/firestore";
+import { deleteDoc, doc, getDoc, serverTimestamp, setDoc } from "@/lib/firestore/instrumented";
 import { db } from "@/lib/firebase";
 import type { VideoTranscript } from "@/types";
 

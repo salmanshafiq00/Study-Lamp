@@ -1,9 +1,13 @@
 import {
-  collection, doc, getDoc, getDocs, orderBy, query,
+  collection, doc, getDoc, getDocs, limit, orderBy, query,
   serverTimestamp, setDoc, updateDoc,
-} from "firebase/firestore";
+} from "@/lib/firestore/instrumented";
 import { db } from "@/lib/firebase";
-import { parseDocumentAnnotations, serializeDocumentAnnotations } from "@/lib/documentAnnotations";
+import {
+  MAX_FALLBACK_FIRESTORE_ANNOTATION_BYTES, buildAnnotationsBlob, parseAnnotationsBlob, parseDocumentAnnotations, serializeDocumentAnnotations,
+} from "@/lib/documentAnnotations";
+import { getBlobClient } from "@/lib/blobClientBrowser";
+import type { SaveStatus } from "@/lib/blobClient";
 import type { PersonalDocument } from "@/types";
 import { normalizeReaderProgress, type ReaderFileType, type ReaderProgressInput } from "@/lib/readerProgress";
 
@@ -16,7 +20,7 @@ import { normalizeReaderProgress, type ReaderFileType, type ReaderProgressInput 
 const documentsCol = (ownerId: string) => collection(db, "users", ownerId, "personalDocuments");
 
 export async function listPersonalDocuments(ownerId: string): Promise<PersonalDocument[]> {
-  const snap = await getDocs(query(documentsCol(ownerId), orderBy("createdAt", "desc")));
+  const snap = await getDocs(query(documentsCol(ownerId), orderBy("createdAt", "desc"), limit(300)));
   return snap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<PersonalDocument, "id">) }));
 }
 
@@ -57,10 +61,35 @@ function documentAnnotationsRef(ownerId: string, documentId: string) {
   return doc(db, "users", ownerId, "personalDocuments", documentId, "annotations", "main");
 }
 
-export async function getPersonalDocumentAnnotations(ownerId: string, documentId: string): Promise<unknown[]> {
+async function readLegacyAnnotations(ownerId: string, documentId: string): Promise<unknown[]> {
   const snapshot = await getDoc(documentAnnotationsRef(ownerId, documentId));
-  if (!snapshot.exists()) return [];
-  return parseDocumentAnnotations(snapshot.data()?.annotationsJson);
+  return snapshot.exists() ? parseDocumentAnnotations(snapshot.data()?.annotationsJson) : [];
+}
+
+/**
+ * P4: annotations live in the user's Drive ("Study Lamp data"), read through IndexedDB. Firestore is only read for
+ * documents not migrated yet (or when Drive is unavailable); the result is then cached locally so it is read once.
+ */
+export async function getPersonalDocumentAnnotations(
+  ownerId: string,
+  documentId: string,
+  onRemoteUpdate?: (annotations: unknown[]) => void,
+): Promise<unknown[]> {
+  const client = getBlobClient(ownerId);
+  const result = await client.readThrough("annotations", documentId, onRemoteUpdate ? (json) => onRemoteUpdate(parseAnnotationsBlob(json)) : undefined);
+  if (result.source === "local" || result.source === "remote") return parseAnnotationsBlob(result.json);
+  const legacy = await readLegacyAnnotations(ownerId, documentId);
+  if (result.source === "none") await client.seedLocal("annotations", documentId, { version: 1, annotations: legacy });
+  return legacy;
+}
+
+export function getAnnotationSaveStatus(ownerId: string, documentId: string): SaveStatus {
+  return getBlobClient(ownerId).getStatus("annotations", documentId);
+}
+
+export function subscribeAnnotationSaveStatus(ownerId: string, documentId: string, listener: (status: SaveStatus) => void): () => void {
+  const id = getBlobClient(ownerId).idOf("annotations", documentId);
+  return getBlobClient(ownerId).subscribe((changedId, status) => { if (changedId === id) listener(status); });
 }
 
 export async function savePersonalDocumentAnnotations(
@@ -68,11 +97,15 @@ export async function savePersonalDocumentAnnotations(
   documentId: string,
   annotations: unknown[],
 ): Promise<void> {
-  const annotationsJson = serializeDocumentAnnotations(annotations);
-  await setDoc(documentAnnotationsRef(ownerId, documentId), {
-    annotationsJson,
-    updatedAt: serverTimestamp(),
-  }, { merge: true });
+  const blob = buildAnnotationsBlob(annotations); // throws above 2 MB
+  // Saved to IndexedDB at once, sent to Drive at most every 3 s. If Drive is not connected (or needs reconnecting),
+  // fall back to the old Firestore copy ONLY when it is small; otherwise the status says "offline copy only".
+  await getBlobClient(ownerId).write("annotations", documentId, blob, async (json) => {
+    const annotationsJson = serializeDocumentAnnotations(parseAnnotationsBlob(json));
+    if (new TextEncoder().encode(annotationsJson).byteLength > MAX_FALLBACK_FIRESTORE_ANNOTATION_BYTES) return false;
+    await setDoc(documentAnnotationsRef(ownerId, documentId), { annotationsJson, updatedAt: serverTimestamp() }, { merge: true });
+    return true;
+  });
 }
 
 export async function deletePersonalDocument(idToken: string, documentId: string): Promise<void> {

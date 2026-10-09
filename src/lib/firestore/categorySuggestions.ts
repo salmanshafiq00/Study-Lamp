@@ -1,11 +1,11 @@
-import { addDoc, collection, doc, getDoc, getDocs, query, serverTimestamp, updateDoc, where } from "firebase/firestore";
+import { addDoc, collection, doc, getDoc, getDocs, limit, query, serverTimestamp, updateDoc, where } from "@/lib/firestore/instrumented";
 import { db } from "@/lib/firebase";
 import { createCategory } from "@/lib/firestore/categoriesTags";
 import type { CategorySuggestion, CategorySuggestionStatus } from "@/types";
 
 export async function listCategorySuggestions(status?: CategorySuggestionStatus): Promise<CategorySuggestion[]> {
   const col = collection(db, "categorySuggestions");
-  const ref = status ? query(col, where("status", "==", status)) : col;
+  const ref = status ? query(col, where("status", "==", status), limit(100)) : query(col, limit(100));
   const snap = await getDocs(ref);
   return snap.docs.map((docSnap) => ({ id: docSnap.id, ...docSnap.data() } as CategorySuggestion));
 }

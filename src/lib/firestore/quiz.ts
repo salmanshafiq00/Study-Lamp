@@ -1,4 +1,4 @@
-import { doc, getDoc, serverTimestamp, setDoc } from "firebase/firestore";
+import { doc, getDoc, serverTimestamp, setDoc } from "@/lib/firestore/instrumented";
 import { db } from "@/lib/firebase";
 import type { QuizQuestion, VideoQuizCache } from "@/types";
 export { buildVideoSourceHash } from "@/lib/quizSource";

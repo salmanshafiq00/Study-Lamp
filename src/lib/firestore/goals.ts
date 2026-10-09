@@ -1,11 +1,11 @@
-import { addDoc, collection, deleteDoc, doc, getDocs, orderBy, query, serverTimestamp, updateDoc } from "firebase/firestore";
+import { addDoc, collection, deleteDoc, doc, getDocs, limit, orderBy, query, serverTimestamp, updateDoc } from "@/lib/firestore/instrumented";
 import { db } from "@/lib/firebase";
 import type { Goal, PriorityLevel } from "@/types";
 
 const goalsCol = (uid: string) => collection(db, "users", uid, "goals");
 
 export async function listGoals(uid: string): Promise<Goal[]> {
-  const q = query(goalsCol(uid), orderBy("createdAt", "desc"));
+  const q = query(goalsCol(uid), orderBy("createdAt", "desc"), limit(500)); // safety cap; goals stay far below this
   const snap = await getDocs(q);
   return snap.docs.map((d) => ({ id: d.id, ...d.data() }) as Goal);
 }

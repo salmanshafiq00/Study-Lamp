@@ -22,7 +22,7 @@ describe("checkRateLimit", () => {
   it("exposes the documented presets", () => {
     assert.deepEqual(
       Object.fromEntries(Object.entries(RATE_LIMITS).map(([name, value]) => [name, value.limit])),
-      { default: 60, authSensitive: 10, stream: 1200, thumbnail: 600, sign: 180, import: 30, googleSync: 30, googleApply: 20 },
+      { default: 60, authSensitive: 10, stream: 1200, thumbnail: 600, sign: 180, import: 30, googleSync: 30, googleApply: 20, blob: 60 },
     );
   });
 

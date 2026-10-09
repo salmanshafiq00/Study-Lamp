@@ -1,5 +1,9 @@
 export const MAX_DOCUMENT_ANNOTATION_BYTES = 850 * 1024;
 
+export const MAX_BLOB_ANNOTATION_BYTES = 2 * 1024 * 1024;
+/** Legacy Firestore copy is only used as a fallback without Drive, and only when small (decision D16 spirit). */
+export const MAX_FALLBACK_FIRESTORE_ANNOTATION_BYTES = 200 * 1024;
+
 export interface DocumentAnnotationItem {
   annotation: { type: number; [key: string]: unknown };
 }
@@ -31,4 +35,22 @@ export function parseDocumentAnnotations(json: unknown): unknown[] {
   } catch {
     return [];
   }
+}
+
+export interface AnnotationsBlob { version: 1; annotations: DocumentAnnotationItem[] }
+
+/** Payload stored in Drive (users/.../annotations-<id>.json). Throws a clear error above 2 MB. */
+export function buildAnnotationsBlob(items: unknown[]): AnnotationsBlob {
+  const blob: AnnotationsBlob = { version: 1, annotations: prepareDocumentAnnotations(items) };
+  if (new TextEncoder().encode(JSON.stringify(blob)).byteLength > MAX_BLOB_ANNOTATION_BYTES) {
+    throw new Error("PDF annotations exceed the 2 MB limit.");
+  }
+  return blob;
+}
+
+/** Validates on read: a user may have edited the Drive file, so anything unexpected is dropped. */
+export function parseAnnotationsBlob(value: unknown): unknown[] {
+  if (!value || typeof value !== "object") return [];
+  const annotations = (value as { annotations?: unknown }).annotations;
+  return Array.isArray(annotations) ? prepareDocumentAnnotations(annotations) : [];
 }

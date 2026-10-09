@@ -9,6 +9,7 @@ import { toast } from "sonner";
 import { MAX_PDF_PREVIEW_BYTES, formatBytes, readResponseWithLimit } from "@/lib/documentViewerUtils";
 import { driveResponseErrorMessage } from "@/lib/driveErrors";
 import { pdfiumWasmUrl } from "@/lib/pdfAssets";
+import type { SaveStatus } from "@/lib/blobClient";
 
 const PDF_DOCUMENT_ID = "study-material-pdf";
 /** If nothing is on screen after this long, show ways out instead of an endless loading state. */
@@ -29,6 +30,7 @@ interface PdfReaderProps {
   onPageJumpHandled?: () => void;
   onProgress?: (progress: { lastPage: number; zoom: number }) => void;
   onAnnotationsChange?: (annotations: unknown[]) => void;
+  annotationStatus?: SaveStatus;
   onExplainPage?: (pageNumber: number, text: string) => Promise<void>;
   explainingPage?: boolean;
 }
@@ -57,6 +59,7 @@ export function PdfReader({
   onPageJumpHandled,
   onProgress,
   onAnnotationsChange,
+  annotationStatus,
   onExplainPage,
   explainingPage = false,
 }: PdfReaderProps) {
@@ -396,7 +399,12 @@ export function PdfReader({
   return (
     <div className="overflow-hidden rounded-md border border-border bg-card">
       <div className="flex items-center justify-between gap-2 border-b border-border bg-muted/40 px-3 py-2">
-        <p className="text-xs text-muted-foreground">Page {currentPage}</p>
+        <p className="text-xs text-muted-foreground">
+          Page {currentPage}
+          {annotationStatus && annotationStatus.state !== "saved" && (
+            <span className="ml-2" role="status">· {annotationStatus.state === "saving" ? "Saving annotations…" : annotationStatus.code === "reconnect" || annotationStatus.code === "no_drive" ? "Reconnect Google Drive to save more annotations (offline copy only)" : "Annotations: offline copy only"}</span>
+          )}
+        </p>
         {onExplainPage && <Button type="button" size="sm" variant="outline" className="gap-1.5" onClick={() => void explainCurrentPage().catch((error) => toast.error(error instanceof Error ? error.message : "Couldn't read this page."))} loading={explainingPage} loadingText="Explaining…"><BookOpenText className="h-4 w-4" />Explain this page</Button>}
       </div>
       <div className="relative h-[68vh] min-h-[28rem] overflow-hidden bg-muted lg:h-[calc(100vh-15rem)] lg:min-h-[35rem]">

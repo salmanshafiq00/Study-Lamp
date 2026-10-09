@@ -5,9 +5,10 @@ import { AppShell } from "@/components/layout/AppShell";
 import { RequireAdmin } from "@/components/auth/RequireAuth";
 import { Card, CardContent } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
-import { listUsers } from "@/lib/firestore/users";
-import { computeActiveUserCounts, computeSignupsPerDay, type ActiveUserCounts, type SignupsPerDay } from "@/lib/adminAnalytics";
+import { getAdminUserCounts, listRecentSignups, type AdminUserCounts } from "@/lib/firestore/users";
+import { computeSignupsPerDay, type SignupsPerDay } from "@/lib/adminAnalytics";
 import type { UserProfile } from "@/types";
+// AdminUserCounts has the same shape as ActiveUserCounts.
 import { Users, UserCheck, UserX, ShieldCheck, TrendingUp } from "lucide-react";
 
 export default function AdminDashboardPage() {
@@ -20,16 +21,18 @@ export default function AdminDashboardPage() {
 
 function AdminDashboardContent() {
   const [users, setUsers] = React.useState<UserProfile[]>([]);
+  const [counts, setCounts] = React.useState<AdminUserCounts | null>(null);
   const [loading, setLoading] = React.useState(true);
 
+  // P2: totals come from aggregate COUNT queries and the chart from last-30-days signups only (both cached 10 min),
+  // instead of reading every user document.
   React.useEffect(() => {
-    listUsers().then((u) => {
-      setUsers(u);
-      setLoading(false);
-    });
+    Promise.all([getAdminUserCounts(), listRecentSignups(30)])
+      .then(([totals, recent]) => { setCounts(totals); setUsers(recent); })
+      .catch(() => { setCounts(null); setUsers([]); })
+      .finally(() => setLoading(false));
   }, []);
 
-  const counts: ActiveUserCounts | null = loading ? null : computeActiveUserCounts(users);
   const signups: SignupsPerDay[] = loading ? [] : computeSignupsPerDay(users, 30);
 
   return (

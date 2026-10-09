@@ -1,4 +1,4 @@
-import { addDoc, collection, doc, getDoc, getDocs, query, serverTimestamp, setDoc, updateDoc, where } from "firebase/firestore";
+import { addDoc, collection, doc, getDoc, getDocs, limit, query, serverTimestamp, setDoc, updateDoc, where } from "@/lib/firestore/instrumented";
 import { db } from "@/lib/firebase";
 import { renumberSteps, sanitizeRoadmapSteps } from "@/lib/roadmapUtils";
 import type { LearningRoadmap, RoadmapLevel, RoadmapTemplate, RoadmapStep } from "@/types";
@@ -35,7 +35,7 @@ export async function saveRoadmapPlan(categoryId: string, plan: Record<RoadmapLe
 }
 
 export async function listLearningRoadmaps(uid: string): Promise<LearningRoadmap[]> {
-  const snap = await getDocs(collection(db, "users", uid, "learningRoadmaps"));
+  const snap = await getDocs(query(collection(db, "users", uid, "learningRoadmaps"), limit(50)));
   return snap.docs.map((d) => ({ id: d.id, ...d.data() } as LearningRoadmap));
 }
 

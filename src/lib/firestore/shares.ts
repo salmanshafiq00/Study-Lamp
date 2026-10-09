@@ -1,7 +1,7 @@
 import {
-  collection, deleteDoc, doc, getDoc, getDocs, query, serverTimestamp,
+  collection, deleteDoc, doc, getDoc, getDocs, limit, query, serverTimestamp,
   setDoc, updateDoc, where,
-} from "firebase/firestore";
+} from "@/lib/firestore/instrumented";
 import { db } from "@/lib/firebase";
 import { getCategory } from "@/lib/firestore/categoriesTags";
 import { computeExpiresAt, generateShareToken, isShareExpired, isShareRevoked, resolveShareVisibilityState } from "@/lib/sharing";
@@ -37,7 +37,7 @@ export async function getShareByToken(token: string): Promise<ShareRecord | null
 }
 
 export async function findShareForEntity(ownerUid: string, entityType: ShareEntityType, entityId: string): Promise<ShareRecord | null> {
-  const q = query(sharesCol(), where("ownerUid", "==", ownerUid), where("entityType", "==", entityType), where("entityId", "==", entityId));
+  const q = query(sharesCol(), where("ownerUid", "==", ownerUid), where("entityType", "==", entityType), where("entityId", "==", entityId), limit(1));
   const snap = await getDocs(q);
   if (snap.empty) return null;
   const [first] = snap.docs;
@@ -45,12 +45,12 @@ export async function findShareForEntity(ownerUid: string, entityType: ShareEnti
 }
 
 export async function listSharesByOwner(ownerUid: string): Promise<ShareRecord[]> {
-  const snap = await getDocs(query(sharesCol(), where("ownerUid", "==", ownerUid)));
+  const snap = await getDocs(query(sharesCol(), where("ownerUid", "==", ownerUid), limit(50)));
   return snap.docs.map((item) => ({ id: item.id, ...item.data() }) as ShareRecord);
 }
 
 export async function listSharesForRecipient(recipientUid: string): Promise<ShareRecord[]> {
-  const snap = await getDocs(query(sharesCol(), where("recipientUid", "==", recipientUid)));
+  const snap = await getDocs(query(sharesCol(), where("recipientUid", "==", recipientUid), limit(50)));
   return snap.docs.map((item) => ({ id: item.id, ...item.data() }) as ShareRecord);
 }
 

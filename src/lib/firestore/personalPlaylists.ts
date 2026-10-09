@@ -1,7 +1,7 @@
 import {
   addDoc, collection, deleteDoc, doc, getCountFromServer, getDoc, getDocs, increment,
-  orderBy, query, serverTimestamp, Timestamp, updateDoc, where, writeBatch,
-} from "firebase/firestore";
+  limit, orderBy, query, serverTimestamp, Timestamp, updateDoc, where, writeBatch,
+} from "@/lib/firestore/instrumented";
 import { db } from "@/lib/firebase";
 import { mapWithConcurrency } from "@/lib/allVideosUtils";
 import { computePlaylistSummary, summaryNeedsWrite } from "@/lib/playlistSummary";
@@ -46,7 +46,7 @@ export async function recomputePlaylistSummary(
 }
 
 export async function listPersonalPlaylists(ownerId: string): Promise<PersonalPlaylist[]> {
-  const snap = await getDocs(playlistsCol(ownerId));
+  const snap = await getDocs(query(playlistsCol(ownerId), limit(100)));
   return snap.docs.map((d) => ({ id: d.id, ownerId, ...d.data() }) as PersonalPlaylist);
 }
 

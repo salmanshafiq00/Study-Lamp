@@ -36,3 +36,10 @@ export function isoDatePart(rfc3339: string | null | undefined): string | null {
   const datePart = rfc3339.slice(0, 10);
   return isValidIsoDate(datePart) ? datePart : null;
 }
+
+/** Today's date in the user's LOCAL time zone as yyyy-MM-dd (never toISOString(), which is UTC). */
+export function localIsoDate(date: Date = new Date()): string {
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${date.getFullYear()}-${month}-${day}`;
+}

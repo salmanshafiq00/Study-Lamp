@@ -21,6 +21,7 @@ import { auth, db } from "@/lib/firebase";
 import { ensureUserHasDefaultCategories } from "@/lib/firestore/categoriesTags";
 import { hasCompletedOnboarding, normalizeUserInterests } from "@/lib/userInterests";
 import { shouldBlockUnverified } from "@/lib/emailVerification";
+import { clearLocalBlobs } from "@/lib/blobClientBrowser";
 import type { UserProfile } from "@/types";
 
 interface AuthContextValue {
@@ -221,6 +222,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const logout = React.useCallback(async () => {
     await fbSignOut(auth);
+    await clearLocalBlobs().catch(() => {}); // P4: no document data stays in this browser after sign-out
   }, []);
 
   const resetPassword = React.useCallback(async (email: string) => {

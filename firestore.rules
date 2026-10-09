@@ -302,6 +302,21 @@ service cloud.firestore {
         allow delete: if isSelf(uid) || isAdmin();
       }
 
+      // P3: one aggregate document per local day (yyyy-MM-dd). Owner-only, fixed key allowlist, bounded numbers.
+      match /learningDays/{day} {
+        allow read: if isSelf(uid) || isAdmin();
+        allow create, update: if isSelf(uid) &&
+          day.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$') &&
+          request.resource.data.keys().hasOnly(['events', 'byEvent', 'watchSeconds', 'docMinutes', 'quizzes', 'updatedAt']) &&
+          (!('events' in request.resource.data) || (request.resource.data.events is number && request.resource.data.events <= 100000)) &&
+          (!('watchSeconds' in request.resource.data) || (request.resource.data.watchSeconds is number && request.resource.data.watchSeconds <= 86400)) &&
+          (!('docMinutes' in request.resource.data) || (request.resource.data.docMinutes is number && request.resource.data.docMinutes <= 1440)) &&
+          (!('quizzes' in request.resource.data) || (request.resource.data.quizzes is number && request.resource.data.quizzes <= 10000)) &&
+          (!('byEvent' in request.resource.data) || (request.resource.data.byEvent is map && request.resource.data.byEvent.size() <= 20));
+        allow delete: if false;
+      }
+
+      // Legacy (before P3). No new writes are made by the app; kept readable until the P6 cleanup removes old events.
       match /learningEvents/{eventId} {
         allow read: if isSelf(uid) || isAdmin();
         allow create: if isSelf(uid) &&
@@ -399,6 +414,11 @@ service cloud.firestore {
       // access goes through /api/drive/* routes using the Admin SDK. See
       // src/lib/server/driveConnections.ts.
       match /driveConnections/{connectionId} {
+        allow read, write: if false;
+      }
+
+      // P4: pointers to Study Lamp's own files in the user's Drive ("Study Lamp data"). Server-only (Admin SDK).
+      match /blobs/{blobId} {
         allow read, write: if false;
       }
 

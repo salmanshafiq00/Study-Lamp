@@ -16,6 +16,7 @@ export const RATE_LIMITS = {
   import: { limit: 30 },
   googleSync: { limit: 30 },
   googleApply: { limit: 20 },
+  blob: { limit: 60 },
 } as const;
 
 export type RateLimitPreset = keyof typeof RATE_LIMITS;

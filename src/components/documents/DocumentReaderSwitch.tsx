@@ -1,6 +1,7 @@
 "use client";
 
 import dynamic from "next/dynamic";
+import type { SaveStatus } from "@/lib/blobClient";
 import { Download } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -43,13 +44,14 @@ export interface DocumentReaderSwitchProps {
   onPageJumpHandled: () => void;
   onProgress: (progress: ReaderProgressInput) => void;
   onAnnotationsChange: (annotations: unknown[]) => void;
+  annotationStatus?: SaveStatus;
   onExplainPage: (pageNumber: number, pageText: string) => Promise<void>;
 }
 
 /** PDF -> PDF reader; Word / Excel -> their readers; anything else -> Drive's own preview ("Open in Drive" fallback). */
 export function DocumentReaderSwitch({
   doc, signedStreamUrl, streamError, driveViewUrl, annotations, requestedPage, explainingPage,
-  onDownload, onPlainText, refreshSourceUrl, onPageJumpHandled, onProgress, onAnnotationsChange, onExplainPage,
+  onDownload, onPlainText, refreshSourceUrl, onPageJumpHandled, onProgress, onAnnotationsChange, annotationStatus, onExplainPage,
 }: DocumentReaderSwitchProps) {
   if (doc.fileType === "pdf") {
     return (
@@ -67,6 +69,7 @@ export function DocumentReaderSwitch({
         onProgress={onProgress}
         savedAnnotations={annotations}
         onAnnotationsChange={onAnnotationsChange}
+        annotationStatus={annotationStatus}
         onExplainPage={onExplainPage}
         explainingPage={explainingPage}
       />

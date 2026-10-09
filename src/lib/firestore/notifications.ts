@@ -1,6 +1,6 @@
 import {
   addDoc, collection, doc, getDocs, limit, orderBy, query, serverTimestamp, updateDoc, where, writeBatch,
-} from "firebase/firestore";
+} from "@/lib/firestore/instrumented";
 import { db } from "@/lib/firebase";
 import type { AppNotification, NotificationType } from "@/types";
 
