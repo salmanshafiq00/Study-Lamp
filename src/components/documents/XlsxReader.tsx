@@ -55,6 +55,7 @@ export function XlsxReader({
 
   React.useEffect(() => {
     let active = true;
+    const controller = new AbortController();
     setLoading(true);
     setError(null);
     setSheets([]);
@@ -65,7 +66,7 @@ export function XlsxReader({
 
     void (async () => {
       try {
-        const response = await fetch(sourceUrl, { credentials: "same-origin" });
+        const response = await fetch(sourceUrl, { credentials: "same-origin", signal: controller.signal });
         if (!response.ok) throw new Error(await driveResponseErrorMessage(response, response.status === 404 ? "This file is no longer available in Google Drive." : `Couldn't download this Excel workbook (${response.status}).`));
         const bytes = await readResponseWithLimit(response, MAX_XLSX_PREVIEW_BYTES, "This Excel workbook");
         const parsed = parseSpreadsheet(bytes);
@@ -90,7 +91,7 @@ export function XlsxReader({
       }
     })();
 
-    return () => { active = false; };
+    return () => { active = false; controller.abort(); };
   }, [sourceUrl]);
 
   const activeSheet = sheets[activeSheetIndex];

@@ -4,11 +4,16 @@ import * as React from "react";
 import Link from "next/link";
 import { PDFViewer, type PluginRegistry } from "@embedpdf/react-pdf-viewer";
 import { Button } from "@/components/ui/button";
-import { Skeleton } from "@/components/ui/skeleton";
 import { BookOpenText, Download, ExternalLink, HardDrive, RotateCw } from "lucide-react";
 import { toast } from "sonner";
+import { MAX_PDF_PREVIEW_BYTES, formatBytes, readResponseWithLimit } from "@/lib/documentViewerUtils";
+import { driveResponseErrorMessage } from "@/lib/driveErrors";
+import { pdfiumWasmUrl } from "@/lib/pdfAssets";
 
 const PDF_DOCUMENT_ID = "study-material-pdf";
+/** If nothing is on screen after this long, show ways out instead of an endless loading state. */
+const SLOW_LOAD_MS = 15_000;
+const PROGRESS_UI_INTERVAL_MS = 120;
 
 interface PdfReaderProps {
   documentTitle: string;
@@ -28,6 +33,16 @@ interface PdfReaderProps {
   explainingPage?: boolean;
 }
 
+/**
+ * How loading works (and why):
+ *  - The viewer (PDFium engine, ~4.6 MB wasm) starts immediately, while this component downloads the PDF
+ *    itself through the signed Drive proxy. The two used to run one after the other, because EmbedPDF only
+ *    starts fetching the file after its engine is ready (its "range-request" mode is not implemented in
+ *    2.15.x; the whole file is always fetched). Doing the download here also gives real progress and the
+ *    same Drive error messages the Word and Excel readers show.
+ *  - The finished bytes are handed to the viewer only after every event listener is attached, so the
+ *    "document opened" event can never be missed (a missed event left the skeleton on screen forever).
+ */
 export function PdfReader({
   documentTitle,
   sourceUrl,
@@ -47,35 +62,38 @@ export function PdfReader({
 }: PdfReaderProps) {
   const [readerError, setReaderError] = React.useState<string | null>(initialError ?? null);
   const [activeSourceUrl, setActiveSourceUrl] = React.useState(sourceUrl);
+  const [reloadNonce, setReloadNonce] = React.useState(0);
   const [reloading, setReloading] = React.useState(false);
   const [documentReady, setDocumentReady] = React.useState(false);
+  const [download, setDownload] = React.useState<{ loaded: number; total: number | null } | null>(null);
+  const [downloaded, setDownloaded] = React.useState(false);
   const [slowLoad, setSlowLoad] = React.useState(false);
   const [currentPage, setCurrentPage] = React.useState(Math.max(1, initialPage));
-  const latestUrl = React.useRef(activeSourceUrl);
   const latestRefresh = React.useRef(refreshSourceUrl);
   const latestProgress = React.useRef(onProgress);
   const latestAnnotationChange = React.useRef(onAnnotationsChange);
   const latestSavedAnnotations = React.useRef(savedAnnotations);
   const latestExplainPage = React.useRef(onExplainPage);
+  const latestTitle = React.useRef(documentTitle);
+  const initialPageRef = React.useRef(Math.max(1, initialPage));
+  const initialZoomRef = React.useRef(Math.max(0.1, initialZoom));
   const pageNumber = React.useRef(Math.max(1, initialPage));
-  const zoomLevel = React.useRef(initialZoom);
+  const zoomLevel = React.useRef(Math.max(0.1, initialZoom));
   const restoringInitialPosition = React.useRef(true);
   const annotationExportTimer = React.useRef<ReturnType<typeof setTimeout> | null>(null);
   const retrying = React.useRef(false);
-  const retriedUrl = React.useRef<string | null>(null);
+  const refreshedUrl = React.useRef<string | null>(null);
   const registry = React.useRef<PluginRegistry | null>(null);
   const eventUnsubscribers = React.useRef<Array<() => void>>([]);
+  /** The downloaded file. Kept (the engine copies it) so a remounted viewer can open it again without a new download. */
+  const bytesRef = React.useRef<ArrayBuffer | null>(null);
+  const handedOff = React.useRef<{ registry: PluginRegistry; bytes: ArrayBuffer } | null>(null);
+
+  // The engine runs in a worker created from a blob: URL, where relative URLs cannot be resolved, so this must be absolute.
   const config = React.useMemo(() => ({
-    documentManager: activeSourceUrl ? {
-      initialDocuments: [{
-        url: activeSourceUrl,
-        documentId: PDF_DOCUMENT_ID,
-        name: documentTitle,
-        mode: "range-request" as const,
-        scale: initialZoom,
-      }],
-    } : undefined,
-    wasmUrl: "/wasm/pdfium.wasm",
+    wasmUrl: typeof window === "undefined"
+      ? ""
+      : pdfiumWasmUrl(window.location.origin, process.env.NEXT_PUBLIC_PDFIUM_WASM_VERSION),
     worker: true,
     fontFallback: null,
     fonts: { ui: null, signature: null },
@@ -85,19 +103,24 @@ export function PdfReader({
       dark: { accent: { primary: "hsl(var(--primary))" } },
     },
     tabBar: "never" as const,
-  }), [activeSourceUrl, documentTitle, initialZoom]);
+  }), []);
 
-  latestUrl.current = activeSourceUrl;
   latestRefresh.current = refreshSourceUrl;
   latestProgress.current = onProgress;
   latestAnnotationChange.current = onAnnotationsChange;
   latestSavedAnnotations.current = savedAnnotations;
   latestExplainPage.current = onExplainPage;
+  latestTitle.current = documentTitle;
 
   React.useEffect(() => {
-    pageNumber.current = Math.max(1, initialPage);
-    setCurrentPage(Math.max(1, initialPage));
-    zoomLevel.current = Math.max(0.1, initialZoom);
+    const page = Math.max(1, initialPage);
+    const zoom = Math.max(0.1, initialZoom);
+    if (page === initialPageRef.current && zoom === initialZoomRef.current) return;
+    initialPageRef.current = page;
+    initialZoomRef.current = zoom;
+    pageNumber.current = page;
+    setCurrentPage(page);
+    zoomLevel.current = zoom;
     restoringInitialPosition.current = true;
   }, [initialPage, initialZoom]);
 
@@ -110,21 +133,104 @@ export function PdfReader({
     if (sourceUrl) setReaderError(null);
   }, [sourceUrl]);
 
-  React.useEffect(() => () => {
+  function detachViewer() {
     eventUnsubscribers.current.forEach((unsubscribe) => unsubscribe());
-    if (annotationExportTimer.current) clearTimeout(annotationExportTimer.current);
+    eventUnsubscribers.current = [];
     registry.current = null;
+    handedOff.current = null;
+  }
+
+  React.useEffect(() => () => {
+    detachViewer();
+    if (annotationExportTimer.current) clearTimeout(annotationExportTimer.current);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Never leave the person staring at a skeleton with no explanation: after 20 s
-  // without the document opening, show a hint with ways out. Nothing is torn down,
-  // so a slow-but-working load still completes normally.
+  // While the error panel is shown the viewer is unmounted, so its registry is gone.
+  React.useEffect(() => {
+    if (readerError) detachViewer();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [readerError]);
+
+  // The engine file is fetched by a worker that swallows its own failures, so check it here and say so out loud.
+  React.useEffect(() => {
+    const url = config.wasmUrl;
+    if (!url) return;
+    const controller = new AbortController();
+    fetch(url, { method: "HEAD", signal: controller.signal }).then((response) => {
+      if (!response.ok) {
+        setReaderError(`The PDF engine file couldn't be loaded (HTTP ${response.status}). Reload the page, or open the file in the browser viewer.`);
+      }
+    }).catch(() => undefined);
+    return () => controller.abort();
+  }, [config.wasmUrl]);
+
+  // Download the PDF while the engine starts.
+  React.useEffect(() => {
+    if (!activeSourceUrl) return;
+    let cancelled = false;
+    const controller = new AbortController();
+    bytesRef.current = null;
+    setDocumentReady(false);
+    setDownloaded(false);
+    setDownload({ loaded: 0, total: null });
+    let lastUiUpdate = 0;
+
+    void (async () => {
+      try {
+        const response = await fetch(activeSourceUrl, { credentials: "same-origin", signal: controller.signal });
+        if (!response.ok) {
+          if (response.status === 401 && refreshedUrl.current !== activeSourceUrl) {
+            // The signed link expired (for example a tab left open overnight): get a fresh one once.
+            refreshedUrl.current = activeSourceUrl;
+            await response.body?.cancel().catch(() => undefined);
+            const fresh = await latestRefresh.current();
+            if (cancelled) return;
+            if (fresh === activeSourceUrl) setReloadNonce((value) => value + 1);
+            else setActiveSourceUrl(fresh);
+            return;
+          }
+          throw new Error(await driveResponseErrorMessage(
+            response,
+            response.status === 404 ? "This file is no longer available in Google Drive." : "Couldn't download this PDF from Google Drive.",
+          ));
+        }
+        const buffer = await readResponseWithLimit(response, MAX_PDF_PREVIEW_BYTES, "This PDF", (loaded, total) => {
+          const now = performance.now();
+          if (cancelled || now - lastUiUpdate < PROGRESS_UI_INTERVAL_MS) return;
+          lastUiUpdate = now;
+          setDownload({ loaded, total });
+        });
+        if (cancelled) return;
+        bytesRef.current = buffer;
+        setDownload(null);
+        setDownloaded(true);
+        if (registry.current) openBytes(registry.current);
+      } catch (error) {
+        if (cancelled || controller.signal.aborted) return;
+        setDownload(null);
+        const isNetwork = error instanceof TypeError;
+        setReaderError(!isNetwork && error instanceof Error && error.message
+          ? error.message
+          : "Couldn't download this PDF. Check your connection and try again.");
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+      controller.abort();
+    };
+    // openBytes only reads refs, so it is safe to leave out.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeSourceUrl, reloadNonce]);
+
+  // Never leave the person staring at a loading state with no explanation.
   React.useEffect(() => {
     setSlowLoad(false);
-    if (documentReady || !activeSourceUrl || readerError) return;
-    const timer = setTimeout(() => setSlowLoad(true), 20_000);
+    if (documentReady || readerError) return;
+    const timer = setTimeout(() => setSlowLoad(true), SLOW_LOAD_MS);
     return () => clearTimeout(timer);
-  }, [documentReady, activeSourceUrl, readerError]);
+  }, [documentReady, readerError, activeSourceUrl, reloadNonce]);
 
   React.useEffect(() => {
     if (!requestedPage || !documentReady || !registry.current) return;
@@ -138,55 +244,44 @@ export function PdfReader({
     onPageJumpHandled?.();
   }, [requestedPage, documentReady, onPageJumpHandled]);
 
+  /** Gives the downloaded bytes to a ready viewer, exactly once per (viewer, file) pair. */
+  function openBytes(currentRegistry: PluginRegistry) {
+    const bytes = bytesRef.current;
+    if (!bytes) return;
+    if (handedOff.current?.registry === currentRegistry && handedOff.current.bytes === bytes) return;
+    const manager = currentRegistry.getPlugin("document-manager")?.provides?.();
+    if (!manager) return;
+    handedOff.current = { registry: currentRegistry, bytes };
+    const open = () => {
+      manager.openDocumentBuffer({
+        buffer: bytes,
+        name: latestTitle.current,
+        documentId: PDF_DOCUMENT_ID,
+        scale: zoomLevel.current,
+        autoActivate: true,
+      });
+    };
+    if (manager.isDocumentOpen(PDF_DOCUMENT_ID)) manager.closeDocument(PDF_DOCUMENT_ID).wait(open, open);
+    else open();
+  }
+
   async function retryAtCurrentPage(): Promise<void> {
     if (retrying.current) return;
     retrying.current = true;
     setReloading(true);
     setReaderError(null);
-    let removeLayoutListener: (() => void) | undefined;
     try {
       const freshUrl = await latestRefresh.current();
-      const currentRegistry = registry.current;
-      if (!currentRegistry) {
-        setActiveSourceUrl(freshUrl);
-        retriedUrl.current = null;
-        setDocumentReady(false);
-        return;
-      }
-      const manager = currentRegistry.getPlugin("document-manager")?.provides?.();
-      const scroll = currentRegistry.getPlugin("scroll")?.provides?.();
-      if (!manager || !scroll) throw new Error("The PDF reader could not reconnect to the document.");
-
-      await manager.closeDocument(PDF_DOCUMENT_ID).toPromise().catch(() => undefined);
-      const restoredLayout = new Promise<void>((resolve) => {
-        removeLayoutListener = scroll.onLayoutReady((event: { documentId: string; isInitial: boolean; totalPages: number }) => {
-          if (event.documentId !== PDF_DOCUMENT_ID || !event.isInitial) return;
-          scroll.forDocument(PDF_DOCUMENT_ID).scrollToPage({
-            pageNumber: Math.max(1, Math.min(pageNumber.current, event.totalPages)),
-            behavior: "instant",
-          });
-          removeLayoutListener?.();
-          resolve();
-        });
-      });
-
-      const opened = await manager.openDocumentUrl({
-        url: freshUrl,
-        documentId: PDF_DOCUMENT_ID,
-        name: documentTitle,
-        mode: "range-request",
-        scale: zoomLevel.current,
-        autoActivate: true,
-      }).toPromise();
-      await opened.task.toPromise();
-      await restoredLayout;
-      latestUrl.current = freshUrl;
-      retriedUrl.current = null;
-      setDocumentReady(true);
+      // Reopen on the page and zoom the person was at.
+      initialPageRef.current = pageNumber.current;
+      initialZoomRef.current = zoomLevel.current;
+      restoringInitialPosition.current = true;
+      refreshedUrl.current = null;
+      setActiveSourceUrl(freshUrl);
+      setReloadNonce((value) => value + 1);
     } catch (error) {
       setReaderError(friendlyPdfError(error, false));
     } finally {
-      removeLayoutListener?.();
       retrying.current = false;
       setReloading(false);
     }
@@ -196,7 +291,6 @@ export function PdfReader({
     eventUnsubscribers.current.forEach((unsubscribe) => unsubscribe());
     eventUnsubscribers.current = [];
     registry.current = readyRegistry;
-    setDocumentReady(false);
     const manager = readyRegistry.getPlugin("document-manager")?.provides?.();
     const scroll = readyRegistry.getPlugin("scroll")?.provides?.();
     const zoom = readyRegistry.getPlugin("zoom")?.provides?.();
@@ -209,7 +303,7 @@ export function PdfReader({
       }
     });
     const onError = manager?.onDocumentError((event: { documentId: string; message: string; code?: number; reason?: { code?: number; message?: string } }) => {
-      if (event.documentId !== PDF_DOCUMENT_ID || retrying.current) return;
+      if (event.documentId !== PDF_DOCUMENT_ID) return;
       const failure = event.reason ?? { code: event.code, message: event.message };
       const message = `${event.message} ${failure.message || ""}`.trim();
       // Browser console only; URLs are stripped because the Drive link carries a signature.
@@ -223,20 +317,7 @@ export function PdfReader({
         setReaderError("This PDF appears to be damaged or uses an unsupported format.");
         return;
       }
-      if (code === 2 || /404|file (was )?removed|not found/i.test(message)) {
-        setReaderError("This file is no longer available in Google Drive.");
-        return;
-      }
-      if (/409|connection|reconnect|refresh token|drive account/i.test(message)) {
-        setReaderError("Your Google Drive connection needs attention.");
-        return;
-      }
-      if ((/401|unauthorized|expired/i.test(message) || code === 1) && latestUrl.current && retriedUrl.current !== latestUrl.current) {
-        retriedUrl.current = latestUrl.current;
-        void retryAtCurrentPage();
-        return;
-      }
-      setReaderError("The PDF could not be opened. Check the Drive connection or use the browser viewer.");
+      setReaderError("The PDF could not be opened. Try again, or use the browser viewer.");
     });
     const onPageChange = scroll?.onPageChange((event: { documentId: string; pageNumber: number }) => {
       if (event.documentId !== PDF_DOCUMENT_ID) return;
@@ -247,12 +328,12 @@ export function PdfReader({
     const onLayoutReady = scroll?.onLayoutReady((event: { documentId: string; isInitial: boolean; totalPages: number }) => {
       if (event.documentId !== PDF_DOCUMENT_ID || !event.isInitial) return;
       const scope = scroll.forDocument(PDF_DOCUMENT_ID);
-      const restorePage = Math.max(1, Math.min(initialPage, event.totalPages));
+      const restorePage = Math.max(1, Math.min(initialPageRef.current, event.totalPages));
       pageNumber.current = restorePage;
       setCurrentPage(restorePage);
       if (restorePage !== 1) scope.scrollToPage({ pageNumber: restorePage, behavior: "instant" });
       const zoomScope = zoom?.forDocument(PDF_DOCUMENT_ID);
-      if (initialZoom > 0 && Math.abs(initialZoom - 1) > 0.01) zoomScope?.requestZoom(initialZoom);
+      if (initialZoomRef.current > 0 && Math.abs(initialZoomRef.current - 1) > 0.01) zoomScope?.requestZoom(initialZoomRef.current);
       restoringInitialPosition.current = false;
     });
     const onZoomChange = zoom?.forDocument(PDF_DOCUMENT_ID).onStateChange((state: { currentZoomLevel: number }) => {
@@ -274,6 +355,11 @@ export function PdfReader({
     });
     eventUnsubscribers.current = [onOpened, onError, onPageChange, onLayoutReady, onZoomChange, onAnnotationChange]
       .filter((unsubscribe): unsubscribe is () => void => typeof unsubscribe === "function");
+
+    // Listeners are attached, so it is now safe to open the file. If the document is somehow already open
+    // (a reused viewer), reflect that instead of waiting for an event that already fired.
+    if (manager?.isDocumentOpen(PDF_DOCUMENT_ID) && handedOff.current?.registry !== readyRegistry) setDocumentReady(true);
+    openBytes(readyRegistry);
   }
 
   async function explainCurrentPage() {
@@ -295,14 +381,17 @@ export function PdfReader({
     );
   }
 
-  if (!activeSourceUrl) {
-    return (
-      <div className="space-y-3 rounded-md border border-border p-4">
-        <Skeleton className="h-10 w-full" />
-        <Skeleton className="h-[60vh] w-full" />
-      </div>
-    );
-  }
+  const percent = download && download.total ? Math.min(100, Math.round((download.loaded / download.total) * 100)) : null;
+  const status = reloading
+    ? `Reconnecting to Drive and restoring page ${pageNumber.current}…`
+    : !activeSourceUrl
+      ? "Preparing a secure link to your file…"
+      : download
+        ? `Downloading from Google Drive… ${formatBytes(download.loaded)}${download.total ? ` of ${formatBytes(download.total)}` : ""}`
+        : downloaded
+          ? "Opening PDF…"
+          : "Starting…";
+  const engineStalled = slowLoad && downloaded && !documentReady;
 
   return (
     <div className="overflow-hidden rounded-md border border-border bg-card">
@@ -311,30 +400,37 @@ export function PdfReader({
         {onExplainPage && <Button type="button" size="sm" variant="outline" className="gap-1.5" onClick={() => void explainCurrentPage().catch((error) => toast.error(error instanceof Error ? error.message : "Couldn't read this page."))} loading={explainingPage} loadingText="Explaining…"><BookOpenText className="h-4 w-4" />Explain this page</Button>}
       </div>
       <div className="relative h-[68vh] min-h-[28rem] overflow-hidden bg-muted lg:h-[calc(100vh-15rem)] lg:min-h-[35rem]">
-      {!documentReady && !reloading && (
-        <div className="absolute inset-0 z-10 space-y-3 bg-background p-4">
-          <Skeleton className="h-10 w-full" />
-          <div className="h-1 w-full overflow-hidden rounded-full bg-muted" role="progressbar" aria-label="Loading PDF">
-            <div className="h-full w-1/3 animate-pulse rounded-full bg-primary" />
-          </div>
-          <Skeleton className="mx-auto h-[calc(80%-1rem)] w-4/5" />
-          {slowLoad && (
-            <div className="absolute inset-x-4 bottom-4 flex flex-col items-center gap-2 rounded-md border border-border bg-card p-3 text-center text-sm text-muted-foreground shadow-sm">
-              <p>Still loading. Large files can take a minute to come from Drive. If nothing appears, open it another way.</p>
-              <div className="flex flex-wrap justify-center gap-2">
-                <Button type="button" variant="outline" size="sm" onClick={onDownload}><Download className="mr-1.5 h-4 w-4" />Download</Button>
-                <Button asChild size="sm"><a href={driveViewUrl} target="_blank" rel="noopener noreferrer"><ExternalLink className="mr-1.5 h-4 w-4" />Open in browser viewer</a></Button>
-              </div>
+        {!documentReady && (
+          <div className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-4 bg-background p-6 text-center" role="status" aria-live="polite">
+            <p className="text-sm text-muted-foreground">{status}</p>
+            <div
+              className="h-1.5 w-full max-w-sm overflow-hidden rounded-full bg-muted"
+              role="progressbar"
+              aria-label="Loading PDF"
+              aria-valuemin={0}
+              aria-valuemax={100}
+              aria-valuenow={percent ?? undefined}
+            >
+              <div
+                className={percent === null ? "h-full w-1/3 animate-pulse rounded-full bg-primary" : "h-full rounded-full bg-primary transition-[width] duration-150"}
+                style={percent === null ? undefined : { width: `${percent}%` }}
+              />
             </div>
-          )}
-        </div>
-      )}
-      {reloading && (
-        <div className="absolute inset-x-0 top-0 z-20 flex items-center gap-2 bg-background/95 px-3 py-2 text-xs text-muted-foreground">
-          <RotateCw className="h-3.5 w-3.5 animate-spin" /> Reconnecting to Drive and restoring page {pageNumber.current}…
-        </div>
-      )}
-      <PDFViewer config={config} onReady={handleViewerReady} style={{ width: "100%", height: "100%" }} />
+            {slowLoad && (
+              <div className="flex max-w-md flex-col items-center gap-2 rounded-md border border-border bg-card p-3 text-sm text-muted-foreground shadow-sm">
+                <p>{engineStalled
+                  ? "The viewer is taking longer than usual to start."
+                  : "Still loading. Large files can take a while to come from Drive."}</p>
+                <div className="flex flex-wrap justify-center gap-2">
+                  <Button type="button" variant="outline" size="sm" onClick={() => void retryAtCurrentPage()}><RotateCw className="mr-1.5 h-4 w-4" />Try again</Button>
+                  <Button type="button" variant="outline" size="sm" onClick={onDownload}><Download className="mr-1.5 h-4 w-4" />Download</Button>
+                  <Button asChild size="sm"><a href={driveViewUrl} target="_blank" rel="noopener noreferrer"><ExternalLink className="mr-1.5 h-4 w-4" />Open in browser viewer</a></Button>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+        <PDFViewer config={config} onReady={handleViewerReady} style={{ width: "100%", height: "100%" }} />
       </div>
     </div>
   );

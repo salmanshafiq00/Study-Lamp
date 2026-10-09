@@ -67,8 +67,21 @@ const csp = [
 
 const cspHeaderName = enforceCsp ? "Content-Security-Policy" : "Content-Security-Policy-Report-Only";
 
+// Version of the installed PDF engine. PdfReader appends it to the wasm URL (?v=...) so the one-year
+// immutable cache below can never serve an engine file that no longer matches the library.
+const pdfiumVersion = (() => {
+  try {
+    return require("./scripts/pdfiumWasm.cjs").locate()?.version || "";
+  } catch {
+    return "";
+  }
+})();
+
 const nextConfig = {
   reactStrictMode: true,
+  env: {
+    NEXT_PUBLIC_PDFIUM_WASM_VERSION: pdfiumVersion,
+  },
   images: {
     // Keep this allowlist narrow to the specific thumbnail hosts the app actually uses.
     remotePatterns: [
@@ -93,9 +106,10 @@ const nextConfig = {
         ],
       },
       {
-        // Self-hosted PDFium (loaded by PdfReader via wasmUrl: "/wasm/pdfium.wasm").
-        // Correct MIME type enables streaming compilation. The file name is not content-hashed, so
-        // after upgrading @embedpdf packages re-copy the wasm AND rename or purge the cache (see docs/deploy.md).
+        // Self-hosted PDFium (loaded by PdfReader through an ABSOLUTE wasmUrl, because the engine worker is a
+        // blob: worker where relative URLs fail). The file name is not content-hashed, so PdfReader adds
+        // ?v=<engine version>, and scripts/syncPdfiumWasm.cjs keeps public/wasm/pdfium.wasm equal to the
+        // installed package before every dev start and build (see docs/deploy.md).
         source: "/wasm/:path*",
         headers: [
           { key: "Content-Type", value: "application/wasm" },

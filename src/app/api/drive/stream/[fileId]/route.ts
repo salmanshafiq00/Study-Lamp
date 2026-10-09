@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getAccessTokenForConnection, withDriveAccessToken, DriveConnectionError } from "@/lib/server/driveConnections";
 import { logServerError } from "@/lib/server/logError";
 import { DriveApiError, exportFile, fetchFileContent, getFileMetadata, nativeExportMime } from "@/lib/server/googleDrive";
-import { DRIVE_ERROR_MESSAGES, driveHttpStatusForCode } from "@/lib/driveErrors";
+import { DRIVE_ERROR_MESSAGES, driveHttpStatusForCode, type DriveErrorCode } from "@/lib/driveErrors";
 import { checkRateLimit } from "@/lib/server/rateLimit";
 import { createDriveTiming, type DriveTiming } from "@/lib/server/timing";
 import { verifyDriveUrl, type DriveUrlPurpose } from "@/lib/server/driveSignedUrl";
@@ -64,13 +64,27 @@ async function getStreamResponse(req: NextRequest, params: RouteParams["params"]
           if (!exportMime) throw new DriveApiError(400, DRIVE_ERROR_MESSAGES.unsupported_type, "unsupported_type");
           return timing.measure("upstream_ms", () => exportFile(accessToken, params.fileId, exportMime));
         }
-        return timing.measure("upstream_ms", () => fetchFileContent(accessToken, params.fileId, req.headers.get("range")));
+        return timing.measure("upstream_ms", () => fetchFileContent(accessToken, params.fileId, req.headers.get("range"), req.signal));
       },
       () => timing.measure("token_ms", () => getAccessTokenForConnection(uid, connectionId)),
     );
 
+    if (upstream.status === 416) {
+      // Range outside the file: pass it on as-is so players and viewers can recover.
+      const rangeHeaders = new Headers();
+      const contentRange = upstream.headers.get("content-range");
+      if (contentRange) rangeHeaders.set("Content-Range", contentRange);
+      await upstream.body?.cancel().catch(() => undefined);
+      return new NextResponse(null, { status: 416, headers: rangeHeaders });
+    }
     if (!upstream.ok && upstream.status !== 206) {
-      return NextResponse.json({ error: "Google Drive couldn't serve this file." }, { status: upstream.status === 404 ? 404 : 502 });
+      // Specific, safe codes so the reader can say what is wrong (no access / deleted / reconnect) instead of "failed".
+      await upstream.body?.cancel().catch(() => undefined);
+      const code: DriveErrorCode = upstream.status === 404 ? "not_found"
+        : upstream.status === 403 ? "permission"
+        : upstream.status === 401 ? "auth"
+        : "upstream";
+      return NextResponse.json({ error: DRIVE_ERROR_MESSAGES[code], code }, { status: driveHttpStatusForCode(code) });
     }
 
     const headers = new Headers();
@@ -78,6 +92,9 @@ async function getStreamResponse(req: NextRequest, params: RouteParams["params"]
       const value = upstream.headers.get(key);
       if (value) headers.set(key, value);
     }
+    // fetch() already decoded a compressed body, so the upstream length no longer matches what is sent;
+    // a wrong Content-Length makes browsers cut the file short.
+    if (upstream.headers.get("content-encoding")) headers.delete("content-length");
     const contentType = (upstream.headers.get("content-type") || "application/octet-stream").split(";")[0].trim().toLowerCase();
     // Exports are generated on the fly and cannot be range-requested.
     if (exportPurpose) headers.delete("accept-ranges");
@@ -91,6 +108,8 @@ async function getStreamResponse(req: NextRequest, params: RouteParams["params"]
 
     return new NextResponse(upstream.body, { status: upstream.status, headers });
   } catch (err) {
+    // The browser went away (tab closed, video seek, navigation): nothing to report and nobody to answer.
+    if (req.signal.aborted) return new NextResponse(null, { status: 499 });
     if (err instanceof DriveApiError && err.code) {
       return NextResponse.json({ error: DRIVE_ERROR_MESSAGES[err.code], code: err.code }, { status: driveHttpStatusForCode(err.code) });
     }

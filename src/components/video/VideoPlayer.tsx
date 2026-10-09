@@ -95,27 +95,57 @@ function DriveVideoPlayer({
   onProgressRef.current = onProgress;
   const [authedSrc, setAuthedSrc] = React.useState<string | null>(null);
   const [loadError, setLoadError] = React.useState<string | null>(null);
+  // Read the auth object through a ref so a new object with the same uid (token refresh) never restarts playback.
+  const userRef = React.useRef(user);
+  userRef.current = user;
+  const uid = user?.uid ?? null;
+  /** Where to continue after the signed link had to be renewed mid-playback. */
+  const resumeAtRef = React.useRef<number | null>(null);
+  const renewedRef = React.useRef(false);
+
+  const signStreamUrl = React.useCallback(async (): Promise<string> => {
+    const currentUser = userRef.current;
+    if (!currentUser) throw new Error("Not signed in.");
+    const idToken = await currentUser.getIdToken();
+    const [signedUrl] = await getSignedDriveUrls(idToken, currentUser.uid, [{
+      fileId: driveFileId,
+      connectionId: driveConnectionId,
+      purpose: "stream",
+    }]);
+    return signedUrl;
+  }, [driveFileId, driveConnectionId]);
 
   React.useEffect(() => {
     let active = true;
-    (async () => {
-      setAuthedSrc(null);
-      setLoadError(null);
-      if (!user) return;
-      try {
-        const idToken = await user.getIdToken();
-        const [signedUrl] = await getSignedDriveUrls(idToken, user.uid, [{
-          fileId: driveFileId,
-          connectionId: driveConnectionId,
-          purpose: "stream",
-        }]);
-        if (active) setAuthedSrc(signedUrl);
-      } catch {
-        if (active) setLoadError("Couldn't load this video from Google Drive.");
-      }
-    })();
+    setAuthedSrc(null);
+    setLoadError(null);
+    resumeAtRef.current = null;
+    renewedRef.current = false;
+    if (!uid) return;
+    signStreamUrl()
+      .then((signedUrl) => { if (active) setAuthedSrc(signedUrl); })
+      .catch(() => { if (active) setLoadError("Couldn't load this video from Google Drive."); });
     return () => { active = false; };
-  }, [user, driveFileId, driveConnectionId]);
+  }, [uid, signStreamUrl]);
+
+  // The signed link lasts 6 hours. If playback fails (expired link after a long pause, dropped connection),
+  // renew it once and continue from the same second instead of leaving a dead player.
+  async function handleVideoError() {
+    const el = videoRef.current;
+    if (renewedRef.current) {
+      setAuthedSrc(null);
+      setLoadError("This video stopped loading. Check your connection or Drive access, then reload the page.");
+      return;
+    }
+    renewedRef.current = true;
+    resumeAtRef.current = el?.currentTime || startSeconds || null;
+    try {
+      setAuthedSrc(await signStreamUrl());
+    } catch {
+      setAuthedSrc(null);
+      setLoadError("Couldn't reconnect to Google Drive. Reload the page and try again.");
+    }
+  }
 
   const flushProgress = React.useCallback(() => {
     const video = videoRef.current;
@@ -142,6 +172,15 @@ function DriveVideoPlayer({
 
   function handleLoadedMetadata() {
     const el = videoRef.current;
+    const resumeAt = resumeAtRef.current;
+    if (resumeAt !== null) {
+      // Renewed link: continue where playback broke, and play on (it was playing or about to).
+      if (el) el.currentTime = resumeAt;
+      resumeAtRef.current = null;
+      renewedRef.current = false;
+      el?.play().catch(() => {});
+      return;
+    }
     if (el && startSeconds > 0) el.currentTime = startSeconds;
     if (autoPlay) el?.play().catch(() => {});
   }
@@ -182,7 +221,10 @@ function DriveVideoPlayer({
         ref={videoRef}
         src={authedSrc}
         controls
+        playsInline
+        preload="metadata"
         className="h-full w-full"
+        onError={() => void handleVideoError()}
         onLoadedMetadata={handleLoadedMetadata}
         onTimeUpdate={handleTimeUpdate}
         onPause={handlePause}

@@ -70,7 +70,7 @@ After a clean week: set `CSP_MODE=enforce` in Vercel, redeploy, and recheck the 
 
 ## PDFium wasm
 
-`public/wasm/pdfium.wasm` is self-hosted and loaded by `PdfReader` from `/wasm/pdfium.wasm`. It is served as `application/wasm` with a one-year immutable cache. The file name is not hashed, so after upgrading `@embedpdf/react-pdf-viewer`, replace the file with the version that ships with the new package **and** make sure browsers fetch it again (rename the file and update `wasmUrl` in `PdfReader.tsx`, or shorten the cache). A mismatched wasm and JS version breaks the PDF reader.
+`public/wasm/pdfium.wasm` is self-hosted. `scripts/syncPdfiumWasm.cjs` runs before `npm run dev` and `npm run build` and copies the file from the installed `@embedpdf/pdfium` package, so it can never drift from the library (a mismatch makes the viewer fail silently). `PdfReader` loads it through an **absolute** URL with `?v=<engine version>`; a relative URL does not work because EmbedPDF's engine runs in a `blob:` worker. The file is served as `application/wasm` with a one-year immutable cache, which is safe because the version is in the URL. Keep `@embedpdf/react-pdf-viewer` pinned to an exact version.
 
 ## Thumbnail backfill
 

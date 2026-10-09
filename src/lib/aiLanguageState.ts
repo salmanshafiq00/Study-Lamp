@@ -38,6 +38,6 @@ export function isLanguageOverridden(defaultLanguage: AiLanguage, override: AiLa
 }
 
 export const AI_LANGUAGE_LABELS: Record<AiLanguage, string> = {
-  en: "English (EN)",
-  bn: "Bengali (BN)",
+  en: "EN",
+  bn: "BN",
 };

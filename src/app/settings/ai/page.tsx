@@ -268,8 +268,8 @@ function AiConnectionsContent() {
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="en">English (EN)</SelectItem>
-                <SelectItem value="bn">Bengali (BN)</SelectItem>
+                <SelectItem value="en">EN</SelectItem>
+                <SelectItem value="bn">BN</SelectItem>
               </SelectContent>
             </Select>
           </CardContent>

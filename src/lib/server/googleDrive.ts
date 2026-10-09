@@ -264,12 +264,13 @@ async function listFolderFiles(accessToken: string, folderId: string, mimeClause
  *  ways so the caller (the secure playback/download proxy) can support
  *  seeking and resumable downloads. Returns the raw fetch Response — the
  *  caller pipes .body straight through rather than buffering it. */
-export async function fetchFileContent(accessToken: string, fileId: string, range?: string | null): Promise<Response> {
+export async function fetchFileContent(accessToken: string, fileId: string, range?: string | null, signal?: AbortSignal): Promise<Response> {
   assertDriveId(fileId);
   const headers: Record<string, string> = { Authorization: `Bearer ${accessToken}` };
   if (range) headers.Range = range;
   // no-store: Next's fetch data cache cannot hold bodies over 2 MB and would log an error for every large file.
-  return fetch(`${DRIVE_API}/files/${encodeURIComponent(fileId)}?alt=media&supportsAllDrives=true`, { headers, cache: "no-store" });
+  // `signal` lets the caller stop the Drive download when the browser disconnects (tab closed, video seek).
+  return fetch(`${DRIVE_API}/files/${encodeURIComponent(fileId)}?alt=media&supportsAllDrives=true`, { headers, cache: "no-store", signal });
 }
 
 /** Proxies a Drive-hosted thumbnail (thumbnailLink requires the same OAuth

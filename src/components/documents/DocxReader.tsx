@@ -147,6 +147,7 @@ export function DocxReader({
 
   React.useEffect(() => {
     let active = true;
+    const controller = new AbortController();
     documentBytes.current = null;
     reportingReady.current = false;
     setPlainText(null);
@@ -156,7 +157,7 @@ export function DocxReader({
 
     void (async () => {
       try {
-        const response = await fetch(sourceUrl, { credentials: "same-origin" });
+        const response = await fetch(sourceUrl, { credentials: "same-origin", signal: controller.signal });
         if (!response.ok) throw new Error(await driveResponseErrorMessage(response, response.status === 404 ? "This file is no longer available in Google Drive." : `Couldn't download this Word document (${response.status}).`));
         const bytes = await readResponseWithLimit(response, MAX_DOCX_PREVIEW_BYTES, "This Word document");
         if (!active) return;
@@ -170,7 +171,8 @@ export function DocxReader({
       }
     })();
 
-    return () => { active = false; };
+    // Stop the download when the person leaves or the link changes (it was running to completion in the background).
+    return () => { active = false; controller.abort(); };
   }, [sourceUrl, renderDocument]);
 
   async function updateLayout(nextFit: boolean, nextZoom: number) {
