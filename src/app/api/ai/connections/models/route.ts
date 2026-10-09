@@ -36,7 +36,7 @@ export const POST = withAuthedRoute(async ({ uid, req }) => {
       { headers: { "Cache-Control": "private, no-store" } }
     );
   } catch (error: any) {
-    logServerError("Fetch AI models error:", error instanceof Error ? error.name : "unknown");
+    logServerError("Fetch AI models error", error);
     return NextResponse.json({ error: "Unable to fetch AI models." }, { status: 500 });
   }
 });

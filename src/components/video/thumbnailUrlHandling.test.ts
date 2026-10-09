@@ -1,7 +1,21 @@
 import assert from "node:assert/strict";
-import { describe, it } from "node:test";
+import { before, describe, it } from "node:test";
 
-import { hasExpiredSignedUrl, signedUrlExpiry, skipOptimizer } from "./VideoThumbnail";
+type Thumbnail = typeof import("./VideoThumbnail");
+
+// VideoThumbnail pulls in the Firebase client at load time, which throws without NEXT_PUBLIC_FIREBASE_* values.
+// Without them these tests are SKIPPED with a message instead of failing the whole run.
+const hasFirebaseEnv = Boolean(process.env.NEXT_PUBLIC_FIREBASE_API_KEY && process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID);
+const skip = hasFirebaseEnv ? false : "skipped: set NEXT_PUBLIC_FIREBASE_API_KEY and NEXT_PUBLIC_FIREBASE_PROJECT_ID to run";
+
+let hasExpiredSignedUrl: Thumbnail["hasExpiredSignedUrl"];
+let signedUrlExpiry: Thumbnail["signedUrlExpiry"];
+let skipOptimizer: Thumbnail["skipOptimizer"];
+
+before(async () => {
+  if (!hasFirebaseEnv) return;
+  ({ hasExpiredSignedUrl, signedUrlExpiry, skipOptimizer } = await import("./VideoThumbnail"));
+});
 
 /**
  * These helpers exist to work around third-party CDN behaviour, and getting any
@@ -9,7 +23,7 @@ import { hasExpiredSignedUrl, signedUrlExpiry, skipOptimizer } from "./VideoThum
  * exported from the component purely to be testable here.
  */
 
-describe("skipOptimizer", () => {
+describe("skipOptimizer", { skip }, () => {
   it("bypasses the optimizer for Facebook's CDN hosts", () => {
     // Next's optimizer fetches server-side; Facebook's CDN rejects that
     // (datacenter IP + referer), so the optimized URL 403s while the browser
@@ -39,7 +53,7 @@ describe("skipOptimizer", () => {
   });
 });
 
-describe("signedUrlExpiry", () => {
+describe("signedUrlExpiry", { skip }, () => {
   // A real Facebook thumbnail URL shape: `oe` is a unix timestamp in hex.
   const realUrl =
     "https://scontent-iad3-1.xx.fbcdn.net/v/t15.5256-10/595067206_n.jpg" +
@@ -64,7 +78,7 @@ describe("signedUrlExpiry", () => {
   });
 });
 
-describe("hasExpiredSignedUrl", () => {
+describe("hasExpiredSignedUrl", { skip }, () => {
   const url = "https://scontent.xx.fbcdn.net/a.jpg?oh=sig&oe=6A9CD537"; // expires 2026-09-06
 
   it("is true once the embedded expiry has passed", () => {
@@ -82,7 +96,7 @@ describe("hasExpiredSignedUrl", () => {
   });
 });
 
-describe("URL immutability contract", () => {
+describe("URL immutability contract", { skip }, () => {
   it("the signed URL is left byte-identical — no cache-buster is appended", () => {
     // Regression guard. An earlier revision retried with `?_thumbRetry=N`,
     // which invalidates the `oh=` signature and guarantees a 403 on a URL that

@@ -30,7 +30,7 @@ export const POST = withAuthedRoute(async ({ uid, req }) => {
     return NextResponse.json(result, { headers: { "Cache-Control": "private, no-store" } });
   } catch (err: any) {
     // Clarification is best-effort — never block saving over it.
-    if (err instanceof AiServiceError) if (err instanceof AiServiceError) logServerError(`Clarify AI error [${err.code}]`, err);
+    if (err instanceof AiServiceError) logServerError(`Clarify AI error [${err.code}]`, err);
     return NextResponse.json({ ambiguous: false });
   }
 });

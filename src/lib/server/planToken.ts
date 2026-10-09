@@ -103,10 +103,10 @@ export function verifyPlanToken(token: string, expectedUser?: string, expectedSc
   }
 
   const nowSeconds = Math.floor(nowMs / 1000);
-  const exp = payload.exp;
-  if (!Number.isInteger(exp) || exp === undefined || exp <= nowSeconds) {
+  if (typeof payload.exp !== "number" || !Number.isInteger(payload.exp) || payload.exp <= nowSeconds) {
     throw new PlanTokenVerificationError("expired", "Plan token has expired.");
   }
+  const exp: number = payload.exp;
 
   if (expectedUser && payload.uid !== expectedUser) {
     throw new PlanTokenVerificationError("wrong_user", "Plan token belongs to a different user.");

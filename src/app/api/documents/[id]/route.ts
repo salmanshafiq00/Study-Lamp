@@ -52,7 +52,7 @@ export const DELETE = withAuthedRoute<RouteParams["params"]>(async ({ uid, param
 
     return NextResponse.json({ ok: true }, { headers: { "Cache-Control": "private, no-store" } });
   } catch (error) {
-    logServerError("Document delete failed", error instanceof Error ? error.name : "unknown");
+    logServerError("Document delete failed", error);
     return NextResponse.json({ error: "Couldn't remove this document." }, { status: 500 });
   }
 }, { scope: "document-delete", limit: 60, tooManyMessage: "Too many requests. Please slow down.", retryAfterSeconds: null });

@@ -79,7 +79,7 @@ export const POST = withAuthedRoute(async ({ uid, req }) => {
     if (err instanceof DriveApiError && err.status === 429) {
       return NextResponse.json({ error: "Google Drive is rate-limiting requests. Try again in a minute." }, { status: 429, headers: { "Retry-After": "60" } });
     }
-    logServerError("Drive folder import failed", err instanceof DriveApiError ? `DriveApiError ${err.status}` : err);
+    logServerError("Drive folder import failed", err);
     return NextResponse.json({ error: "Couldn't import that folder from Drive." }, { status: 502 });
   }
 }, { scope: "drive:import-folder", preset: "import" });

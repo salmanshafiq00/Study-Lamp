@@ -4,7 +4,7 @@ Supersedes v7. Goals, in priority order:
 
 1. **Stay on the Firebase free (Spark) plan for a long time.** Large data lives in the user's Google Drive, not in Firestore.
 2. **Make every Google feature (Drive, Docs, Sheets, Calendar, Tasks, PDF, Excel, Word, video) fast, smooth and secure.**
-3. Finish the unfinished v7 work, then build the features.
+3. Finish the unfinished v7 work, then build the features (Not Now).
 
 Any model can follow this file: every step has a prompt you can paste, a "Read first" list, exact acceptance tests, and a free-tier cost note.
 

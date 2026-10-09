@@ -167,7 +167,7 @@ export const POST = withAuthedRoute(async ({ uid, req }) => {
     if (error instanceof DriveConnectionError) {
       return NextResponse.json({ error: error.message }, { status: error.code === "not_found" ? 404 : 409 });
     }
-    logServerError("Drive bulk import failed", error instanceof Error ? error.name : "unknown");
+    logServerError("Drive bulk import failed", error);
     return NextResponse.json({ error: "Couldn't import those files from Drive." }, { status: 502 });
   }
 }, { scope: "drive:import-files", preset: "import" });

@@ -79,7 +79,7 @@ export async function fetchModelsForProvider(
 
   if (!response.ok) {
     // Only the status is logged; provider bodies can echo request details.
-    logServerError(`AI models lookup failed (${provider}, status ${response.status})`, response.status);
+    logServerError(`AI models lookup failed (${provider})`, Object.assign(new Error("AI models lookup failed"), { status: response.status }));
     return { error: modelsErrorMessage(response.status), status: modelsErrorStatus(response.status) };
   }
 

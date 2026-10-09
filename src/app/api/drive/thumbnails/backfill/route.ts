@@ -69,7 +69,7 @@ export const POST = withAuthedRoute(async ({ uid }) => {
               if (image) await saveDriveThumbnail(uid, target.connectionId, target.fileId, image);
             } catch (error) {
               if (!(error instanceof DriveConnectionError)) {
-                logServerError("Drive thumbnail backfill item failed", error instanceof Error ? error.name : "unknown");
+                logServerError("Drive thumbnail backfill item failed", error);
               }
             }
             // Mark as attempted even on failure so one bad file can't stall the queue;
@@ -78,7 +78,7 @@ export const POST = withAuthedRoute(async ({ uid }) => {
           }
           succeeded++;
         } catch (error) {
-          logServerError("Drive thumbnail backfill write failed", error instanceof Error ? error.name : "unknown");
+          logServerError("Drive thumbnail backfill write failed", error);
         }
       }
     }));
@@ -90,7 +90,7 @@ export const POST = withAuthedRoute(async ({ uid }) => {
       : (await Promise.all([countLegacyThumbnails(uid), countUnattemptedThumbnails(uid)])).reduce((sum, count) => sum + count, 0);
     return NextResponse.json({ processed: succeeded, remaining });
   } catch (error) {
-    logServerError("Drive thumbnail backfill failed", error instanceof Error ? error.name : "unknown");
+    logServerError("Drive thumbnail backfill failed", error);
     return NextResponse.json({ error: "Couldn't refresh Drive thumbnails." }, { status: 500 });
   }
 }, { scope: "drive:thumbnail-backfill" });

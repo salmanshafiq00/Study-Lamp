@@ -1,14 +1,11 @@
-# Normalize line endings to LF on commit, check out as LF everywhere.
-# This avoids mixed CRLF/LF issues in the codebase (B24).
 * text=auto eol=lf
 
-# Binary files: never transform.
 *.png binary
 *.jpg binary
 *.jpeg binary
 *.gif binary
 *.ico binary
-*.svg binary
+*.webp binary
 *.wasm binary
+*.zip binary
 *.tgz binary
-*.pdf binary
