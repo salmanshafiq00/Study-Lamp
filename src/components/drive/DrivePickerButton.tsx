@@ -36,7 +36,7 @@ function loadPickerScripts(): Promise<void> {
 }
 
 /** Reads the public Picker config, toasting a helpful message when it is missing. */
-function getPickerConfig(): { apiKey: string; fallbackAppId: string } | null {
+function getPickerConfig(): { apiKey: string; fallbackAppId: string; overrideAppId: string | null } | null {
   const apiKey = process.env.NEXT_PUBLIC_GOOGLE_PICKER_API_KEY;
   const appId = process.env.NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID;
   if (!apiKey) {
@@ -47,7 +47,13 @@ function getPickerConfig(): { apiKey: string; fallbackAppId: string } | null {
     toast.error("Google Drive picker isn't configured on this deployment (missing Firebase project number).");
     return null;
   }
-  return { apiKey, fallbackAppId: appId };
+  const overrideAppId = process.env.NEXT_PUBLIC_GOOGLE_PICKER_APP_ID?.trim() || null;
+  return { apiKey, fallbackAppId: appId, overrideAppId };
+}
+
+/** Development only: shows which Cloud project number the Picker is using (a public identifier, never a secret). */
+function logPickerAppId(appId: string, source: string): void {
+  if (process.env.NODE_ENV !== "production") console.info(`[picker] appId=${appId} (${source}), origin=${window.location.origin}`);
 }
 
 export interface DrivePickerSelection {
@@ -85,14 +91,15 @@ export function DrivePickerButton({
     if (!user) return;
     const config = getPickerConfig();
     if (!config) return;
-    const { apiKey, fallbackAppId } = config;
+    const { apiKey, fallbackAppId, overrideAppId } = config;
 
     setOpening(true);
     try {
       const idToken = await user.getIdToken();
       const [auth] = await Promise.all([getDrivePickerAuth(idToken, connectionId), loadPickerScripts()]);
       const accessToken = auth.accessToken;
-      const appId = auth.appId ?? fallbackAppId;
+      const appId = overrideAppId ?? auth.appId ?? fallbackAppId;
+      logPickerAppId(appId, overrideAppId ? "env override" : auth.appId ? "Drive OAuth client" : "Firebase sender id");
 
       const google = window.google;
       const views: any[] = [];
@@ -188,7 +195,7 @@ export async function openFolderChildrenPicker(options: {
   if (!config) return;
   const [auth] = await Promise.all([getDrivePickerAuth(options.idToken, options.connectionId), loadPickerScripts()]);
   const accessToken = auth.accessToken;
-  const appId = auth.appId ?? config.fallbackAppId;
+  const appId = config.overrideAppId ?? auth.appId ?? config.fallbackAppId;
 
   const google = window.google;
   const mimeTypes = buildPickerMimeTypes(options.kinds ?? ["video"]);
