@@ -2,15 +2,11 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
 import { signWorkspaceState, verifyWorkspaceState } from "./googleWorkspaceAuth";
-import { signDriveState, verifyDriveState } from "./googleDrive";
 
 // The state helpers read these secrets at call time (not import time), so
 // setting them here — before any test body runs — is enough. Throwaway values,
 // never real credentials.
 process.env.GOOGLE_WORKSPACE_OAUTH_STATE_SECRET = "test-workspace-state-secret";
-process.env.GOOGLE_DRIVE_OAUTH_STATE_SECRET = "test-drive-state-secret";
-process.env.GOOGLE_DRIVE_CLIENT_ID = "test-drive-client";
-process.env.GOOGLE_DRIVE_CLIENT_SECRET = "test-drive-secret";
 process.env.GOOGLE_WORKSPACE_CLIENT_ID = "test-workspace-client";
 process.env.GOOGLE_WORKSPACE_CLIENT_SECRET = "test-workspace-secret";
 
@@ -55,13 +51,5 @@ describe("workspace OAuth state", () => {
   it("rejects when the caller expected a feature the state does not carry", () => {
     const state = signWorkspaceState("user-1", NONCE, ["calendar"]);
     assert.equal(verifyWorkspaceState(state, NONCE, ["tasks"]), null);
-  });
-
-  it("domain-separates: a Drive state is rejected by the Workspace verifier and vice versa", () => {
-    const driveState = signDriveState("user-1", NONCE);
-    assert.equal(verifyWorkspaceState(driveState, NONCE), null);
-
-    const workspaceState = signWorkspaceState("user-1", NONCE, ["calendar"]);
-    assert.equal(verifyDriveState(workspaceState, NONCE), null);
   });
 });

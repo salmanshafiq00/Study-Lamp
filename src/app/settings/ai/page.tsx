@@ -24,6 +24,7 @@ import { PageInfo } from "@/components/shared/PageInfo";
 import { GuideCard, GuideList, GuideSection } from "@/components/shared/GuideCard";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { toast } from "sonner";
+import Link from "next/link";
 
 const PROVIDER_LABELS: Record<string, string> = { gemini: "Gemini", openai: "OpenAI", anthropic: "Anthropic", openrouter: "OpenRouter", groq: "Groq" };
 
@@ -416,7 +417,7 @@ function AiConnectionsContent() {
               </div>
             </div>
             <Button asChild variant="outline" size="sm">
-              <a href="/settings/google">Open Google settings</a>
+              <Link href="/settings/google">Open Google settings</Link>
             </Button>
           </CardContent>
         </Card>

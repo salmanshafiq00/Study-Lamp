@@ -1,15 +1,9 @@
 import crypto from "crypto";
 import { nativeExportMime } from "@/lib/driveMime";
 import { getGoogleClient } from "@/lib/server/googleClientConfig";
+import { WORKSPACE_REDIRECT_PATH } from "@/lib/server/googleWorkspaceAuth";
 import { DRIVE_ERROR_MESSAGES, classifyDriveExportError, extractGoogleErrorReason, type DriveErrorCode } from "@/lib/driveErrors";
-import {
-  buildGoogleAuthUrl,
-  exchangeCode,
-  fetchGoogleAccountEmail,
-  refreshToken,
-  revoke,
-  type GoogleOAuthClient,
-} from "@/lib/server/googleOAuth";
+import { refreshToken, revoke, type GoogleOAuthClient } from "@/lib/server/googleOAuth";
 
 /**
  * Server-only. Raw REST wrapper around Google's OAuth2 + Drive v3 APIs —
@@ -25,16 +19,13 @@ import {
  * connected Google account; it does not grant additional Drive access.
  *
  * Required env vars (server-only, never NEXT_PUBLIC_):
- *   GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET  (shared client; legacy GOOGLE_DRIVE_CLIENT_ID /
- *     GOOGLE_DRIVE_CLIENT_SECRET are still read, see googleClientConfig.ts)
- *   GOOGLE_DRIVE_OAUTH_STATE_SECRET  (generate with: openssl rand -base64 32)
+ *   GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET  (the one shared client, see googleClientConfig.ts)
+ *   GOOGLE_OAUTH_STATE_SECRET  (signs the OAuth state; generate with: openssl rand -base64 32)
  * Plus one public var so the browser can open the Picker:
  *   NEXT_PUBLIC_GOOGLE_PICKER_API_KEY  (a browser API key restricted to the
  *     Picker API — see https://console.cloud.google.com/apis/credentials)
  */
 
-const DRIVE_SCOPE = "https://www.googleapis.com/auth/drive.file https://www.googleapis.com/auth/userinfo.email";
-const DRIVE_REDIRECT_PATH = "/api/drive/auth/callback";
 const DRIVE_API = "https://www.googleapis.com/drive/v3";
 const DRIVE_UPLOAD_API = "https://www.googleapis.com/upload/drive/v3/files";
 const DRIVE_ID_PATTERN = /^[A-Za-z0-9_-]{10,128}$/;
@@ -62,102 +53,12 @@ export function isSupportedUploadMimeType(mimeType: string): boolean {
     SUPPORTED_DOCUMENT_MIME_TYPES.includes(mimeType as typeof SUPPORTED_DOCUMENT_MIME_TYPES[number]);
 }
 
-function env(name: string): string {
-  const v = process.env[name];
-  if (!v) throw new Error(`${name} is not configured. See src/lib/server/googleDrive.ts for the full list of required env vars.`);
-  return v;
-}
-
-export function isDriveConfigured(): boolean {
-  return Boolean(getGoogleClient("drive") && process.env.GOOGLE_DRIVE_OAUTH_STATE_SECRET);
-}
-
-/** The Drive OAuth client config, passed to the generic primitives. */
+/** The OAuth client (shared with Calendar and Tasks). Sign-in happens only through /api/google/auth/*; the redirect
+ *  path is needed by the primitives' type but is not used when refreshing a token. */
 function driveClient(): GoogleOAuthClient {
-  const credentials = getGoogleClient("drive");
+  const credentials = getGoogleClient();
   if (!credentials) throw new Error("Google client id/secret are not configured (GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET).");
-  return { ...credentials, redirectPath: DRIVE_REDIRECT_PATH };
-}
-
-/** Builds the redirect_uri from the request's own origin rather than a
- *  hardcoded env var, so this works unchanged across localhost/preview/prod
- *  deployments — it only has to match one of the "Authorized redirect URIs"
- *  configured on the OAuth client in Google Cloud Console. */
-export function buildRedirectUri(origin: string): string {
-  return `${origin}${DRIVE_REDIRECT_PATH}`;
-}
-
-// ── OAuth "state" — binds the redirect round-trip to the signed-in uid ─────
-// Google's callback is a plain browser GET with no Authorization header, so
-// the state param is how we know *which* Study Lamp user is connecting.
-// Signed (HMAC-SHA256) and short-lived (10 min) so it can't be forged or replayed.
-const STATE_TTL_MS = 10 * 60 * 1000;
-
-export function signDriveState(
-  uid: string,
-  nonce = crypto.randomBytes(32).toString("base64url"),
-  now = Date.now(),
-): string {
-  const payload = `${uid}.${now}.${nonce}`;
-  const sig = crypto.createHmac("sha256", env("GOOGLE_DRIVE_OAUTH_STATE_SECRET")).update(payload).digest("hex");
-  return Buffer.from(`${payload}.${sig}`).toString("base64url");
-}
-
-export function verifyDriveState(
-  state: string,
-  expectedNonce: string | null,
-  now = Date.now(),
-): { uid: string; nonce: string } | null {
-  try {
-    const decoded = Buffer.from(state, "base64url").toString("utf8");
-    const parts = decoded.split(".");
-    if (parts.length !== 4) return null;
-    const [uid, tsRaw, nonce, sig] = parts;
-    const payload = `${uid}.${tsRaw}.${nonce}`;
-    const expected = crypto.createHmac("sha256", env("GOOGLE_DRIVE_OAUTH_STATE_SECRET")).update(payload).digest("hex");
-    const sigBuffer = Buffer.from(sig);
-    const expectedBuffer = Buffer.from(expected);
-    if (sigBuffer.length !== expectedBuffer.length || !crypto.timingSafeEqual(sigBuffer, expectedBuffer)) return null;
-    const ts = Number(tsRaw);
-    const nonceBytes = Buffer.from(nonce, "base64url");
-    if (!uid || !Number.isFinite(ts) || ts > now || now - ts > STATE_TTL_MS || nonceBytes.length !== 32) return null;
-    if (!expectedNonce || !sameText(nonce, expectedNonce)) return null;
-    return { uid, nonce };
-  } catch {
-    return null;
-  }
-}
-
-function sameText(left: string, right: string): boolean {
-  const leftBuffer = Buffer.from(left);
-  const rightBuffer = Buffer.from(right);
-  return leftBuffer.length === rightBuffer.length && crypto.timingSafeEqual(leftBuffer, rightBuffer);
-}
-
-export function buildAuthUrl(origin: string, state: string): string {
-  return buildGoogleAuthUrl(origin, state, driveClient(), {
-    scope: DRIVE_SCOPE,
-    accessType: "offline",
-    // Forces Google to re-issue a refresh_token even for a user who
-    // connected before — without this, re-connecting after a disconnect
-    // would silently come back with no refresh_token at all.
-    prompt: "consent",
-  });
-}
-
-interface TokenResponse {
-  access_token: string;
-  expires_in: number;
-  refresh_token?: string;
-  scope: string;
-  token_type: string;
-}
-
-export async function exchangeCodeForTokens(code: string, origin: string): Promise<TokenResponse> {
-  const tokens = await exchangeCode(code, origin, driveClient());
-  // Drive's callers rely on `scope` being present (it is recorded on the
-  // connection); default to the requested DRIVE_SCOPE if Google omits it.
-  return { ...tokens, scope: tokens.scope ?? DRIVE_SCOPE };
+  return { ...credentials, redirectPath: WORKSPACE_REDIRECT_PATH };
 }
 
 /** Returns a fresh short-lived access token for a stored refresh token.
@@ -169,10 +70,6 @@ export async function refreshAccessToken(refreshTokenValue: string): Promise<{ a
 
 export async function revokeToken(token: string): Promise<void> {
   return revoke(token);
-}
-
-export async function getGoogleAccountEmail(accessToken: string): Promise<string> {
-  return fetchGoogleAccountEmail(accessToken);
 }
 
 // ── Drive v3 file operations ────────────────────────────────────────────

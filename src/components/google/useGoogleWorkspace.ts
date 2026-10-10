@@ -6,7 +6,7 @@ import { useAuth } from "@/components/auth/AuthProvider";
 import { cacheSyncStateFromConnections } from "@/lib/googleCalendarFlag";
 import { listGoogleConnections, startGoogleConnect } from "@/lib/googleClient";
 import { errorMessage } from "@/lib/googleSettings";
-import type { GoogleConnectionSummary, GoogleWorkspaceFeature } from "@/types";
+import type { GoogleConnectionSummary, GoogleFeature, GoogleWorkspaceFeature } from "@/types";
 
 /**
  * Calendar + Tasks connection state, shared by CalendarCard and TasksCard so the page makes ONE list call.
@@ -54,7 +54,8 @@ export function useGoogleWorkspace() {
     if (!user) return;
     // Re-request everything this connection already has so a single consent
     // fixes an "invalid" state without losing existing permissions.
-    const features = connection.grantedScopes.length > 0 ? connection.grantedScopes : (["calendar"] as GoogleWorkspaceFeature[]);
+    const base: GoogleFeature[] = connection.grantedScopes.length > 0 ? [...connection.grantedScopes] : ["calendar"];
+    const features: GoogleFeature[] = connection.driveGranted ? [...base, "drive"] : base;
     setConnecting("reconnect");
     try {
       const idToken = await user.getIdToken();

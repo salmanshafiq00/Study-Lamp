@@ -6,6 +6,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
+import { getDriveMigrationStatus, getLegacyDriveCleanupStatus, runDriveMigration, runLegacyDriveCleanup } from "@/lib/googleClient";
 import { backfillDriveThumbnails, listDriveConnections, disconnectDrive, startDriveConnect } from "@/lib/driveClient";
 import { cn } from "@/lib/utils";
 import { driveStatus, errorMessage } from "@/lib/googleSettings";
@@ -24,6 +25,10 @@ export function DriveCard({ highlight = false }: { highlight?: boolean }) {
   const [disconnectingId, setDisconnectingId] = React.useState<string | null>(null);
   const [refreshingThumbnails, setRefreshingThumbnails] = React.useState(false);
   const [thumbnailsRemaining, setThumbnailsRemaining] = React.useState<number | null>(null);
+  const [pendingMigration, setPendingMigration] = React.useState(0);
+  const [migrating, setMigrating] = React.useState(false);
+  const [cleanable, setCleanable] = React.useState(0);
+  const [cleaning, setCleaning] = React.useState(false);
 
   const load = React.useCallback(async () => {
     if (!user) return;
@@ -31,6 +36,8 @@ export function DriveCard({ highlight = false }: { highlight?: boolean }) {
     try {
       const idToken = await user.getIdToken();
       setConnections(await listDriveConnections(idToken));
+      setPendingMigration((await getDriveMigrationStatus(idToken).catch(() => ({ pending: 0 }))).pending);
+      setCleanable((await getLegacyDriveCleanupStatus(idToken).catch(() => ({ deletable: 0, blocked: 0 }))).deletable);
     } catch (error) {
       toast.error(errorMessage(error, "Failed to load your Google Drive connections."));
     } finally {
@@ -65,6 +72,40 @@ export function DriveCard({ highlight = false }: { highlight?: boolean }) {
       toast.error(errorMessage(error, "Failed to disconnect."));
     } finally {
       setDisconnectingId(null);
+    }
+  }
+
+  async function handleMigrate() {
+    if (!user || migrating) return;
+    if (!confirm(`Move ${pendingMigration} Google Drive connection${pendingMigration === 1 ? "" : "s"} onto your single Google connection? Nothing is deleted, and imported files keep working.`)) return;
+    setMigrating(true);
+    try {
+      const idToken = await user.getIdToken();
+      const { counts } = await runDriveMigration(idToken);
+      if (counts.needs_drive_consent > 0) toast.info('One account also uses Calendar or Tasks. Use "Add Drive access" for it, then run this again.');
+      if (counts.verify_failed > 0 || counts.skipped_invalid > 0) toast.error("Some connections could not be verified. They were left as they are. Reconnect them, then try again.");
+      if (counts.migrated > 0) toast.success(`Moved ${counts.migrated} connection${counts.migrated === 1 ? "" : "s"}.`);
+      await load();
+    } catch (error) {
+      toast.error(errorMessage(error, "Failed to move your Drive connections."));
+    } finally {
+      setMigrating(false);
+    }
+  }
+
+  async function handleCleanup() {
+    if (!user || cleaning) return;
+    if (!confirm(`Delete ${cleanable} old Google Drive record${cleanable === 1 ? "" : "s"}? They were already moved onto your Google connection. Your files, imported documents and Google access are not affected.`)) return;
+    setCleaning(true);
+    try {
+      const idToken = await user.getIdToken();
+      const { deleted } = await runLegacyDriveCleanup(idToken);
+      toast.success(`Deleted ${deleted} old record${deleted === 1 ? "" : "s"}.`);
+      await load();
+    } catch (error) {
+      toast.error(errorMessage(error, "Failed to clean up the old Drive records."));
+    } finally {
+      setCleaning(false);
     }
   }
 
@@ -124,6 +165,16 @@ export function DriveCard({ highlight = false }: { highlight?: boolean }) {
                 <Button size="sm" variant="outline" className="gap-1.5" onClick={handleRefreshThumbnails} disabled={refreshingThumbnails}>
                   <RefreshCw className={`h-4 w-4 ${refreshingThumbnails ? "animate-spin" : ""}`} />
                   {refreshingThumbnails ? `Refreshing${thumbnailsRemaining === null ? "…" : ` (${thumbnailsRemaining} left)`}` : "Refresh thumbnails"}
+                </Button>
+              )}
+              {pendingMigration > 0 && (
+                <Button size="sm" variant="outline" onClick={handleMigrate} loading={migrating} loadingText="Moving…">
+                  Merge into Google connection ({pendingMigration})
+                </Button>
+              )}
+              {cleanable > 0 && (
+                <Button size="sm" variant="outline" onClick={handleCleanup} loading={cleaning} loadingText="Cleaning…">
+                  Clean up old Drive records ({cleanable})
                 </Button>
               )}
               <Button size="sm" className="gap-1.5" onClick={handleConnect} loading={connecting} loadingText="Redirecting…">

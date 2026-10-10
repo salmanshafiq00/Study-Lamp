@@ -1,4 +1,3 @@
-import crypto from "crypto";
 import { getGoogleClient } from "@/lib/server/googleClientConfig";
 import {
   buildGoogleAuthUrl,
@@ -8,21 +7,22 @@ import {
   revoke,
   type GoogleOAuthClient,
 } from "@/lib/server/googleOAuth";
-import { featuresFromGrantedScopes, scopesForFeatures, type GoogleWorkspaceFeature } from "@/lib/googleScopes";
+import { getStateSecret, requireStateSecret, signWithPrefix, signaturesMatch, STATE_PREFIX as STATE_PREFIX_VALUE } from "@/lib/server/googleOAuthState";
+import { googleFeaturesFromGrantedScopes, isGoogleFeature, scopesForGoogleFeatures, type GoogleFeature } from "@/lib/googleScopes";
 
 // Step W2: Workspace-specific OAuth glue. The generic network primitives live
 // in src/lib/server/googleOAuth.ts; this module owns the Workspace OAuth
 // client config, the signed `state` format and the callback's persistence.
 
 const STATE_TTL_MS = 10 * 60 * 1000;
-const STATE_PREFIX = "workspace.v1|"; // domain separation from the Drive state.
+const STATE_PREFIX = STATE_PREFIX_VALUE; // "workspace.v1|": domain separation for the signed state.
 export const WORKSPACE_REDIRECT_PATH = "/api/google/auth/callback";
 export const WORKSPACE_NONCE_COOKIE = "sl_google_nonce";
 
 /** The Workspace OAuth client, read from env. Throws a clear message when a
  *  variable is missing rather than silently sending an empty client_id. */
 function workspaceClient(): GoogleOAuthClient {
-  const credentials = getGoogleClient("workspace");
+  const credentials = getGoogleClient();
   if (!credentials) {
     throw new Error("Google Workspace isn't configured (missing GOOGLE_CLIENT_ID/GOOGLE_CLIENT_SECRET).");
   }
@@ -30,13 +30,12 @@ function workspaceClient(): GoogleOAuthClient {
 }
 
 function stateSecret(): string {
-  const secret = process.env.GOOGLE_WORKSPACE_OAUTH_STATE_SECRET;
-  if (!secret) throw new Error("GOOGLE_WORKSPACE_OAUTH_STATE_SECRET is not configured.");
-  return secret;
+  return requireStateSecret();
 }
 
+/** Configured for every Google feature (Drive, Calendar, Tasks): client pair + state secret. */
 export function isWorkspaceConfigured(): boolean {
-  return Boolean(getGoogleClient("workspace") && process.env.GOOGLE_WORKSPACE_OAUTH_STATE_SECRET);
+  return Boolean(getGoogleClient() && getStateSecret());
 }
 
 /** The auth URL for the requested features, with incremental consent so a
@@ -44,10 +43,10 @@ export function isWorkspaceConfigured(): boolean {
 export function buildWorkspaceAuthUrl(
   origin: string,
   state: string,
-  features: readonly GoogleWorkspaceFeature[],
+  features: readonly GoogleFeature[],
 ): string {
   return buildGoogleAuthUrl(origin, state, workspaceClient(), {
-    scope: scopesForFeatures(features).join(" "),
+    scope: scopesForGoogleFeatures(features).join(" "),
     includeGrantedScopes: true,
     accessType: "offline",
     prompt: "consent",
@@ -60,11 +59,11 @@ export function buildWorkspaceAuthUrl(
 export function signWorkspaceState(
   uid: string,
   nonce: string,
-  features: readonly GoogleWorkspaceFeature[] = [],
+  features: readonly GoogleFeature[] = [],
   nowMs = Date.now(),
 ): string {
   const payload = JSON.stringify({ uid, nonce, features: [...features], ts: nowMs });
-  const signature = crypto.createHmac("sha256", stateSecret()).update(`${STATE_PREFIX}${payload}`).digest("hex");
+  const signature = signWithPrefix(stateSecret(), STATE_PREFIX, payload);
   return Buffer.from(`${payload}.${signature}`).toString("base64url");
 }
 
@@ -74,9 +73,9 @@ export function signWorkspaceState(
 export function verifyWorkspaceState(
   state: string,
   expectedNonce: string | null,
-  expectedFeatures: readonly GoogleWorkspaceFeature[] = [],
+  expectedFeatures: readonly GoogleFeature[] = [],
   nowMs = Date.now(),
-): { uid: string; nonce: string; features: GoogleWorkspaceFeature[] } | null {
+): { uid: string; nonce: string; features: GoogleFeature[] } | null {
   if (!expectedNonce) return null;
   try {
     const decoded = Buffer.from(state, "base64url").toString("utf8");
@@ -87,17 +86,14 @@ export function verifyWorkspaceState(
     const payload = JSON.parse(payloadPart) as { uid?: string; nonce?: string; features?: string[]; ts?: number };
     if (!payload.uid || !payload.nonce || !Number.isFinite(payload.ts)) return null;
 
-    const expectedSignature = crypto.createHmac("sha256", stateSecret()).update(`${STATE_PREFIX}${payloadPart}`).digest("hex");
-    const sigBuffer = Buffer.from(sigPart);
-    const expectedBuffer = Buffer.from(expectedSignature);
-    if (sigBuffer.length !== expectedBuffer.length || !crypto.timingSafeEqual(sigBuffer, expectedBuffer)) return null;
+    if (!signaturesMatch(sigPart, signWithPrefix(stateSecret(), STATE_PREFIX, payloadPart))) return null;
 
     const age = nowMs - Number(payload.ts);
     if (age < 0 || age > STATE_TTL_MS) return null;
     if (payload.nonce !== expectedNonce) return null;
 
     const features = Array.isArray(payload.features)
-      ? payload.features.filter((value): value is GoogleWorkspaceFeature => value === "calendar" || value === "tasks")
+      ? payload.features.filter((value): value is GoogleFeature => isGoogleFeature(value))
       : [];
     if (expectedFeatures.length && !expectedFeatures.every((feature) => features.includes(feature))) return null;
 
@@ -110,7 +106,7 @@ export function verifyWorkspaceState(
 export interface WorkspaceTokenExchangeResult {
   refreshToken: string;
   accessToken: string;
-  grantedFeatures: GoogleWorkspaceFeature[];
+  grantedFeatures: GoogleFeature[];
 }
 
 /** Exchanges the code and reads the GRANTED scope string from the token
@@ -120,7 +116,7 @@ export async function exchangeWorkspaceCode(code: string, origin: string): Promi
   return {
     refreshToken: tokens.refresh_token ?? "",
     accessToken: tokens.access_token,
-    grantedFeatures: featuresFromGrantedScopes(tokens.scope),
+    grantedFeatures: googleFeaturesFromGrantedScopes(tokens.scope),
   };
 }
 

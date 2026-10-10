@@ -17,6 +17,14 @@
 
 export type GoogleWorkspaceFeature = "calendar" | "tasks";
 
+// Step G5: Drive joins the same connection. `GoogleFeature` is the wider type
+// (drive + calendar + tasks). `GoogleWorkspaceFeature` stays calendar/tasks only,
+// so every existing Calendar/Tasks code path keeps its exact types.
+//   drive -> drive.file (only files the user picks or Study Lamp creates)
+export type GoogleFeature = GoogleWorkspaceFeature | "drive";
+
+export const GOOGLE_DRIVE_SCOPE = "https://www.googleapis.com/auth/drive.file";
+
 export const GOOGLE_WORKSPACE_SCOPES: Record<GoogleWorkspaceFeature, string> = {
   calendar: "https://www.googleapis.com/auth/calendar.app.created",
   tasks: "https://www.googleapis.com/auth/tasks",
@@ -37,6 +45,40 @@ export function scopesForFeatures(features: readonly GoogleWorkspaceFeature[]): 
     scopes.push(GOOGLE_USERINFO_EMAIL_SCOPE);
   }
   return scopes;
+}
+
+export function isGoogleFeature(value: unknown): value is GoogleFeature {
+  return value === "drive" || value === "calendar" || value === "tasks";
+}
+
+/** Like scopesForFeatures, but Drive aware. Order is stable (drive, calendar, tasks, email); never anything wider. */
+export function scopesForGoogleFeatures(features: readonly GoogleFeature[]): string[] {
+  const wanted = new Set(features.filter(isGoogleFeature));
+  const scopes: string[] = [];
+  if (wanted.has("drive")) scopes.push(GOOGLE_DRIVE_SCOPE);
+  if (wanted.has("calendar")) scopes.push(GOOGLE_WORKSPACE_SCOPES.calendar);
+  if (wanted.has("tasks")) scopes.push(GOOGLE_WORKSPACE_SCOPES.tasks);
+  scopes.push(GOOGLE_USERINFO_EMAIL_SCOPE);
+  return scopes;
+}
+
+/** Drive aware version of featuresFromGrantedScopes: reads what Google ACTUALLY granted. */
+export function googleFeaturesFromGrantedScopes(scopeString: string | null | undefined): GoogleFeature[] {
+  const granted = new Set<string>((scopeString ?? "").split(/\s+/).filter(Boolean));
+  const features: GoogleFeature[] = [];
+  if (granted.has(GOOGLE_DRIVE_SCOPE)) features.push("drive");
+  if (granted.has(GOOGLE_WORKSPACE_SCOPES.calendar)) features.push("calendar");
+  if (granted.has(GOOGLE_WORKSPACE_SCOPES.tasks)) features.push("tasks");
+  return features;
+}
+
+/** Which requested features were NOT granted (user unticked a box). Drive aware. */
+export function missingGoogleFeatures(
+  requested: readonly GoogleFeature[],
+  scopeString: string | null | undefined,
+): GoogleFeature[] {
+  const granted = new Set(googleFeaturesFromGrantedScopes(scopeString));
+  return Array.from(new Set(requested.filter(isGoogleFeature))).filter((feature) => !granted.has(feature));
 }
 
 /** Parses the space-separated `scope` string Google returns from the token

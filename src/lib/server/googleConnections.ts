@@ -7,7 +7,8 @@ import { refreshWorkspaceAccessToken, revokeWorkspaceToken } from "@/lib/server/
 import { isGoogleAuthInvalid } from "@/lib/server/googleOAuth";
 import { DriveTokenCache } from "@/lib/server/driveTokenCache";
 import { runWithDriveToken } from "@/lib/server/driveRequest";
-import { type GoogleWorkspaceFeature } from "@/lib/server/googleScopes";
+import { type GoogleFeature, type GoogleWorkspaceFeature } from "@/lib/server/googleScopes";
+import { googleDocHasDrive, isDriveOnlyConnection } from "@/lib/server/driveConnectionResolver";
 import { listGoalSyncMappings } from "@/lib/server/googleSyncState";
 import { computeSyncCounts, computeTasksSyncCounts, listOrphanMappings } from "@/lib/server/googleSyncMapping";
 import type { GoogleCalendarConnection, GoogleConnectionSummary, GoogleSyncCounts, GoogleSyncOrphan, GoogleSyncStatus, GoogleTasksConnection, GoogleTasksStatus } from "@/types";
@@ -75,14 +76,16 @@ export function googleConnectionSummaryFrom(id: string, data: FirebaseFirestore.
     grantedScopes,
     calendarEnabled,
     tasksEnabled,
+    driveGranted: googleDocHasDrive(data),
     createdAt: toIso(data.createdAt ?? null),
     lastUsedAt: toIso(data.lastUsedAt ?? null),
   };
 }
 
+/** Calendar/Tasks list. A connection that exists only for Drive is shown on the Drive card, not here. */
 export async function listGoogleConnections(uid: string): Promise<GoogleConnectionSummary[]> {
   const snap = await googleConnectionsRef(uid).orderBy("createdAt", "asc").get();
-  return snap.docs.map((doc) => googleConnectionSummaryFrom(doc.id, doc.data()));
+  return snap.docs.filter((doc) => !isDriveOnlyConnection(doc.data())).map((doc) => googleConnectionSummaryFrom(doc.id, doc.data()));
 }
 
 export async function getGoogleConnectionSummary(uid: string, id: string): Promise<GoogleConnectionSummary | null> {
@@ -93,7 +96,7 @@ export async function getGoogleConnectionSummary(uid: string, id: string): Promi
 
 export async function upsertGoogleConnection(
   uid: string,
-  input: { googleEmail: string; refreshToken: string; grantedScopes: GoogleWorkspaceFeature[] },
+  input: { googleEmail: string; refreshToken: string; grantedScopes: GoogleFeature[] },
 ): Promise<GoogleConnectionSummary> {
   const existing = await googleConnectionsRef(uid).where("googleEmail", "==", input.googleEmail).limit(1).get();
   const now = admin.firestore.FieldValue.serverTimestamp();
@@ -143,6 +146,12 @@ export async function deleteGoogleConnection(uid: string, connectionId: string):
   const refreshToken = decryptApiKey(snap.data()!.encryptedRefreshToken);
   await revokeWorkspaceToken(refreshToken).catch(() => undefined);
   await ref.delete();
+  // Step G5: this connection also carried Drive. Its legacy twin (the old driveConnections doc) holds a token for the
+  // same Google account that is no longer wanted, and the Drive resolver must never fall back to it.
+  const legacyId = snap.data()!.legacyDriveConnectionId;
+  if (typeof legacyId === "string" && legacyId && !legacyId.includes("/")) {
+    await adminDb.collection("users").doc(uid).collection("driveConnections").doc(legacyId).delete().catch(() => undefined);
+  }
   return true;
 }
 

@@ -26,6 +26,7 @@ describe("google connection summary", () => {
     assert.deepEqual(Object.keys(summary).sort(), [
       "calendarEnabled",
       "createdAt",
+      "driveGranted",
       "googleEmail",
       "grantedScopes",
       "id",
@@ -35,6 +36,13 @@ describe("google connection summary", () => {
     ]);
     assert.equal("encryptedRefreshToken" in summary, false);
     assert.equal("refreshToken" in summary, false);
+  });
+
+  it("reports driveGranted from the stored scopes without exposing it as a calendar/tasks scope", () => {
+    const summary = googleConnectionSummaryFrom("conn-3", { ...RAW_DOC, grantedScopes: ["drive", "calendar"] });
+    assert.equal(summary.driveGranted, true);
+    assert.deepEqual(summary.grantedScopes, ["calendar"]);
+    assert.equal(googleConnectionSummaryFrom("conn-4", RAW_DOC).driveGranted, false);
   });
 
   it("normalises an unknown status to active and filters non-feature scopes", () => {

@@ -35,8 +35,14 @@ describe("messagesFromParams", () => {
   });
 
   it("keeps an unknown missing feature name instead of dropping it", () => {
+    assert.deepEqual(messagesFromParams(params("missing=photos")), [
+      { kind: "error", text: "You did not allow photos access, so that feature stays off." },
+    ]);
+  });
+
+  it("names Drive when the user unticked Drive on Google's consent screen (G5)", () => {
     assert.deepEqual(messagesFromParams(params("missing=drive")), [
-      { kind: "error", text: "You did not allow drive access, so that feature stays off." },
+      { kind: "error", text: "You did not allow Drive access, so that feature stays off." },
     ]);
   });
 });

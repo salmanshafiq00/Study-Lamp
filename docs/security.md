@@ -57,8 +57,7 @@ Every Google write (Calendar, Tasks, Docs, Sheets) goes through preview -> confi
 
 | Secret | How to rotate |
 |---|---|
-| `GOOGLE_DRIVE_OAUTH_STATE_SECRET` | Generate a new random value, redeploy. Only Drive connect flows in progress (10 min window) fail; users just retry. |
-| `GOOGLE_WORKSPACE_OAUTH_STATE_SECRET` | Same as above, for the Google Workspace (Calendar/Tasks) connect flow. In-flight connects (10 min) fail; users retry. |
+| `GOOGLE_OAUTH_STATE_SECRET` | One secret for every Google connect flow (the old `GOOGLE_WORKSPACE_OAUTH_STATE_SECRET` is read when it is unset). Generate a new random value, redeploy. Only connect flows in progress (10 minutes) fail. |
 | Firebase Admin key (`FIREBASE_PRIVATE_KEY`, `FIREBASE_CLIENT_EMAIL`) | Google Cloud Console → IAM → Service accounts → create a new key → update the env vars → redeploy → confirm API routes work → **delete the old key**. |
 | Google OAuth client secret (`GOOGLE_CLIENT_SECRET`) | The one "Study Lamp Google Client" serves Drive, Calendar and Tasks. Cloud Console → Credentials → OAuth client → add a new secret → update env → redeploy → disable the old secret. Existing refresh tokens keep working. If you still use the legacy names (`GOOGLE_DRIVE_CLIENT_SECRET`, `GOOGLE_WORKSPACE_CLIENT_SECRET`), update every one that holds the old value. |
 | Facebook app secret | The current code does not read `FACEBOOK_APP_SECRET`. If it is in your env files, remove it. If you ever use it, reset it in Meta for Developers → App settings → Basic. |
@@ -67,13 +66,9 @@ Every Google write (Calendar, Tasks, Docs, Sheets) goes through preview -> confi
 | `NEXT_PUBLIC_GOOGLE_PICKER_API_KEY` (public) | Public by design, so restrict it: HTTP referrers = your production/preview domains, API restriction = **Google Picker API** (and Drive API if required). |
 | `NEXT_PUBLIC_FIREBASE_API_KEY` (public) | Not a secret, but restrict by HTTP referrer in Cloud Console. Security comes from `firestore.rules`. |
 
-## 4. Drive OAuth nonce cookie
+## 4. Google OAuth nonce cookie
 
-`sl_drive_nonce` is set by `/api/drive/auth/state`: `httpOnly`, `secure`, `SameSite=Lax`, path `/api/drive/auth`, 10-minute lifetime. The callback must receive the same nonce that is embedded in the signed `state`; this prevents a stolen or replayed `state` from linking someone else's Drive. The cookie is cleared by the callback.
-
-## 4b. Google Workspace OAuth nonce cookie
-
-`sl_google_nonce` works exactly like `sl_drive_nonce` (Section 4) for `/api/google/auth/*`. The Workspace `state` is signed with `GOOGLE_WORKSPACE_OAUTH_STATE_SECRET` and the HMAC input is domain-separated with a `workspace.v1|` prefix, so a Drive state can never be replayed as a Workspace state (or vice versa) even if the two secrets were ever the same value.
+`sl_google_nonce` is set by `/api/google/auth/state`: `httpOnly`, `secure`, `SameSite=Lax`, path `/api/google/auth`, 10-minute lifetime. The callback (`/api/google/auth/callback`, used for Drive, Calendar and Tasks) must receive the same nonce that is embedded in the signed `state`; this prevents a stolen or replayed `state` from linking someone else's Google account. The `state` is signed with `GOOGLE_OAUTH_STATE_SECRET` (HMAC-SHA256, `workspace.v1|` prefix, 10-minute expiry). The old `sl_drive_nonce` cookie and `/api/drive/auth/*` routes were removed in G7.
 
 ## 5. Rate limiting caveat
 

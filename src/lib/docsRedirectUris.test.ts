@@ -49,9 +49,9 @@ describe("OAuth redirect paths are documented", () => {
   const routePaths = [...new Set(pathsFromRoutes())].sort();
   const codePaths = [...new Set(pathsFromServerCode())].sort();
 
-  it("finds the callback routes and the redirect constants", () => {
-    assert.ok(routePaths.length >= 2, `expected at least two callback routes, found: ${routePaths.join(", ")}`);
-    assert.ok(codePaths.length >= 2, `expected at least two redirect constants, found: ${codePaths.join(", ")}`);
+  it("finds the callback route and the redirect constant", () => {
+    assert.ok(routePaths.length >= 1, `expected at least one callback route, found: ${routePaths.join(", ")}`);
+    assert.ok(codePaths.length >= 1, `expected at least one redirect constant, found: ${codePaths.join(", ")}`);
   });
 
   it("every redirect path sent to Google has a callback route", () => {

@@ -48,7 +48,7 @@ export function messagesFromParams(params: ParamReader): GoogleSettingsMessage[]
     const words = missing
       .split(",")
       .filter(Boolean)
-      .map((feature) => (isWorkspaceFeature(feature) ? FEATURE_LABELS[feature] : feature))
+      .map((feature) => (feature === "drive" ? "Drive" : isWorkspaceFeature(feature) ? FEATURE_LABELS[feature] : feature))
       .join(" and ");
     if (words) messages.push({ kind: "error", text: `You did not allow ${words} access, so that feature stays off.` });
   }

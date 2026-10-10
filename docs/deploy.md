@@ -31,12 +31,10 @@ Set these in Vercel (Production and Preview). `NEXT_PUBLIC_*` values are embedde
 | `AI_CONNECTION_ENCRYPTION_KEY_PREVIOUS` | server | only during key rotation |
 | `GOOGLE_CLIENT_ID` | server | recommended: one OAuth client for Drive, Calendar and Tasks |
 | `GOOGLE_CLIENT_SECRET` | server | recommended: same client |
-| `GOOGLE_DRIVE_CLIENT_ID` | server | legacy, only read when `GOOGLE_CLIENT_ID` is not set |
-| `GOOGLE_DRIVE_CLIENT_SECRET` | server | legacy, only read when `GOOGLE_CLIENT_SECRET` is not set |
-| `GOOGLE_DRIVE_OAUTH_STATE_SECRET` | server | yes for Drive |
+| `GOOGLE_OAUTH_STATE_SECRET` | server | yes (one secret for the Google connect flow) |
 | `GOOGLE_WORKSPACE_CLIENT_ID` | server | legacy, only read when `GOOGLE_CLIENT_ID` is not set |
 | `GOOGLE_WORKSPACE_CLIENT_SECRET` | server | legacy, only read when `GOOGLE_CLIENT_SECRET` is not set |
-| `GOOGLE_WORKSPACE_OAUTH_STATE_SECRET` | server | yes for Calendar/Tasks |
+| `GOOGLE_WORKSPACE_OAUTH_STATE_SECRET` | server | old name, only read when `GOOGLE_OAUTH_STATE_SECRET` is not set |
 | `DRIVE_URL_SIGNING_SECRET` | server | yes for Drive playback |
 | `GOOGLE_SYNC_SIGNING_SECRET` | server | recommended for Calendar/Tasks/Docs/Sheets sync. Signs plan tokens. If unset, plan tokens fall back to `DRIVE_URL_SIGNING_SECRET` (see `docs/security.md` section 2b) |
 | `YOUTUBE_API_KEY` | server | optional |
@@ -48,14 +46,13 @@ Set these in Vercel (Production and Preview). `NEXT_PUBLIC_*` values are embedde
 ## Google OAuth redirect URIs
 
 One OAuth client ("Study Lamp Google Client") serves Drive, Calendar and Tasks. Its **Authorised redirect URIs**
-must contain exactly these paths for each origin you use (localhost and production; Vercel preview domains
+must contain exactly this path for each origin you use (localhost and production; Vercel preview domains
 cannot be listed):
 
-- `/api/drive/auth/callback`
 - `/api/google/auth/callback`
 
-For example `http://localhost:3000/api/drive/auth/callback`, `https://studylamp.vercel.app/api/drive/auth/callback`,
-`http://localhost:3000/api/google/auth/callback` and `https://studylamp.vercel.app/api/google/auth/callback`.
+For example `http://localhost:3000/api/google/auth/callback` and `https://studylamp.vercel.app/api/google/auth/callback`.
+(The separate Drive callback route was removed in G7; delete its two URIs from the client.)
 `src/lib/docsRedirectUris.test.ts` fails if a callback route exists in the code but is missing from this list.
 See `docs/google-workspace.md` for the full client setup.
 

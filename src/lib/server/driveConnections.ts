@@ -3,10 +3,24 @@ import { adminDb } from "@/lib/server/firebase-admin";
 import { encryptApiKey, decryptApiKey } from "@/lib/server/aiEncryption";
 import { refreshAccessToken, revokeToken } from "@/lib/server/googleDrive";
 import { isGoogleAuthInvalid } from "@/lib/server/googleOAuth";
+import { refreshWorkspaceAccessToken } from "@/lib/server/googleWorkspaceAuth";
+import {
+  googleDocHasDrive,
+  planDriveDisconnect,
+  resolveDriveConnection,
+  selectDriveListing,
+  type ResolvedDriveConnection,
+  type ResolverStore,
+} from "@/lib/server/driveConnectionResolver";
 import { DriveTokenCache } from "@/lib/server/driveTokenCache";
 import { runWithDriveToken } from "@/lib/server/driveRequest";
-import type { DriveConnection, DriveConnectionSummary } from "@/types";
+import type { DriveConnectionSummary } from "@/types";
 
+// Step G5: a Drive connection id can now be a legacy id (users/{uid}/driveConnections/{id}) or a unified id
+// (users/{uid}/googleConnections/{id} with "drive" in grantedScopes). Every helper in this file resolves the id
+// through driveConnectionResolver.ts, so callers (import, stream, backup, blob store ...) keep their signatures and
+// documents that store the old `driveConnectionId` keep opening without being rewritten.
+//
 // Server-only. Mirrors src/lib/server/aiConnections.ts exactly: writes go to
 // users/{uid}/driveConnections/{id} via the Admin SDK, which is the only way
 // in — firestore.rules denies this subcollection to the client SDK entirely
@@ -44,6 +58,24 @@ function connectionsRef(uid: string) {
   return adminDb.collection("users").doc(uid).collection("driveConnections");
 }
 
+function googleConnectionsRef(uid: string) {
+  return adminDb.collection("users").doc(uid).collection("googleConnections");
+}
+
+/** Firestore-backed lookups for the resolver. */
+export const firestoreResolverStore: ResolverStore = {
+  getGoogle: (uid, id) => googleConnectionsRef(uid).doc(id).get(),
+  getLegacy: (uid, id) => connectionsRef(uid).doc(id).get(),
+  async findGoogleByLegacyId(uid, legacyId) {
+    const found = await googleConnectionsRef(uid).where("legacyDriveConnectionId", "==", legacyId).limit(1).get();
+    return found.empty ? null : found.docs[0];
+  },
+};
+
+export function resolveDriveConnectionId(uid: string, connectionId: string): Promise<ResolvedDriveConnection | null> {
+  return resolveDriveConnection(firestoreResolverStore, uid, connectionId);
+}
+
 function toIso(value: admin.firestore.Timestamp | null | undefined): string | null {
   return value ? value.toDate().toISOString() : null;
 }
@@ -58,71 +90,119 @@ function toSummary(id: string, data: FirebaseFirestore.DocumentData): DriveConne
   };
 }
 
+function createdAtMillis(data: FirebaseFirestore.DocumentData): number {
+  return typeof data.createdAt?.toMillis === "function" ? data.createdAt.toMillis() : 0;
+}
+
+/** Legacy connections not yet migrated + unified connections with Drive on, oldest first (two bounded reads). */
 export async function listDriveConnections(uid: string): Promise<DriveConnectionSummary[]> {
-  const snap = await connectionsRef(uid).orderBy("createdAt", "asc").get();
-  return snap.docs.map((doc) => toSummary(doc.id, doc.data()));
+  const [legacySnap, googleSnap] = await Promise.all([connectionsRef(uid).limit(50).get(), googleConnectionsRef(uid).limit(50).get()]);
+  const listed = selectDriveListing(
+    legacySnap.docs.map((doc) => ({ id: doc.id, data: doc.data() })),
+    googleSnap.docs.map((doc) => ({ id: doc.id, data: doc.data() })),
+  );
+  return listed
+    .sort((left, right) => createdAtMillis(left.data) - createdAtMillis(right.data))
+    .map((item) => toSummary(item.id, item.data));
 }
 
 export async function getDriveConnectionSummary(uid: string, connectionId: string): Promise<DriveConnectionSummary | null> {
-  const snap = await connectionsRef(uid).doc(connectionId).get();
-  if (!snap.exists) return null;
-  return toSummary(snap.id, snap.data()!);
+  const resolved = await resolveDriveConnectionId(uid, connectionId);
+  if (!resolved) return null;
+  if (resolved.kind === "legacy") {
+    const snap = await connectionsRef(uid).doc(resolved.id).get();
+    return snap.exists ? toSummary(connectionId, snap.data()!) : null;
+  }
+  if (!resolved.hasDrive) return null;
+  const snap = await googleConnectionsRef(uid).doc(resolved.id).get();
+  return snap.exists ? toSummary(connectionId, snap.data()!) : null;
 }
 
-/** Creates (or, if this Google account is already connected, replaces the
- *  refresh token on) a connection. Re-connecting the same Google account is
- *  the normal way a user fixes an "invalid" connection after revoking Study
- *  Lamp's access from their Google Account settings. */
-export async function upsertDriveConnection(
-  uid: string,
-  input: { googleEmail: string; refreshToken: string; scope: string }
-): Promise<DriveConnectionSummary> {
-  const existing = await connectionsRef(uid).where("googleEmail", "==", input.googleEmail).limit(1).get();
-  const now = admin.firestore.FieldValue.serverTimestamp();
-  const doc: Omit<DriveConnection, "id"> = {
-    googleEmail: input.googleEmail,
-    encryptedRefreshToken: encryptApiKey(input.refreshToken),
-    scope: input.scope,
-    status: "active",
-    createdAt: now as any,
-    updatedAt: now as any,
-    lastUsedAt: null,
+/** Disconnects a Drive account. What that means depends on where the token lives (see planDriveDisconnect):
+ *  a legacy or Drive-only connection is deleted and its token revoked at Google (best effort, a failure there never
+ *  blocks removing it here); a unified connection that Calendar or Tasks also use only has Drive switched off, so the
+ *  token stays for the other features. Files already imported keep their driveFileId/driveConnectionId, so playback
+ *  fails with a clear "reconnect" error rather than pointing at a connection that no longer exists. */
+export async function deleteDriveConnection(uid: string, connectionId: string): Promise<boolean> {
+  const resolved = await resolveDriveConnectionId(uid, connectionId);
+  if (!resolved) return false;
+
+  const googleSnap = resolved.kind === "google" ? await googleConnectionsRef(uid).doc(resolved.id).get() : null;
+  if (resolved.kind === "google" && !googleSnap?.exists) return false;
+  const action = planDriveDisconnect(resolved, googleSnap?.data());
+  invalidateAccessToken(uid, connectionId);
+  if (resolved.kind === "google") invalidateAccessToken(uid, resolved.id);
+
+  const deleteLegacyTwin = async (legacyId: string | null) => {
+    if (!legacyId) return;
+    invalidateAccessToken(uid, legacyId);
+    // The old token is no longer used. Deleting the doc stops the resolver from ever falling back to it.
+    await connectionsRef(uid).doc(legacyId).delete().catch(() => undefined);
   };
 
-  if (!existing.empty) {
-    const ref = existing.docs[0].ref;
-    await ref.set({ ...doc, createdAt: existing.docs[0].data().createdAt }, { merge: true });
-    invalidateAccessToken(uid, ref.id);
+  if (action.kind === "delete_legacy") {
+    const ref = connectionsRef(uid).doc(action.legacyId);
     const snap = await ref.get();
-    return toSummary(snap.id, snap.data()!);
+    if (!snap.exists) return false;
+    await revokeToken(decryptApiKey(snap.data()!.encryptedRefreshToken));
+    await ref.delete();
+    return true;
   }
 
-  const ref = connectionsRef(uid).doc();
-  await ref.set(doc);
-  invalidateAccessToken(uid, ref.id);
-  const snap = await ref.get();
-  return toSummary(snap.id, snap.data()!);
-}
+  const ref = googleConnectionsRef(uid).doc(action.googleId);
+  if (action.kind === "drop_drive_feature") {
+    const scopes = Array.isArray(googleSnap?.data()?.grantedScopes) ? (googleSnap!.data()!.grantedScopes as unknown[]) : [];
+    await ref.update({
+      grantedScopes: scopes.filter((scope) => scope !== "drive"),
+      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    });
+    await deleteLegacyTwin(action.legacyId);
+    return true;
+  }
 
-/** Disconnects a Drive account: revokes the refresh token with Google (best
- *  effort — a failure here shouldn't block removing it from Study Lamp) and
- *  deletes the stored connection. Files already imported keep their
- *  driveFileId/driveConnectionId, so playback will start failing with a
- *  clear "reconnect this account" error rather than silently pointing at a
- *  connection that no longer exists — see the stream proxy route. */
-export async function deleteDriveConnection(uid: string, connectionId: string): Promise<boolean> {
-  const ref = connectionsRef(uid).doc(connectionId);
-  const snap = await ref.get();
-  if (!snap.exists) return false;
-  invalidateAccessToken(uid, connectionId);
-  const refreshToken = decryptApiKey(snap.data()!.encryptedRefreshToken);
-  await revokeToken(refreshToken);
+  await revokeToken(decryptApiKey(googleSnap!.data()!.encryptedRefreshToken));
   await ref.delete();
+  await deleteLegacyTwin(action.legacyId);
   return true;
 }
 
 export interface DriveAccessTokenDependencies {
   refreshAccessToken: typeof refreshAccessToken;
+  /** Refresh for tokens that live on a unified googleConnections doc. */
+  refreshGoogleAccessToken: typeof refreshWorkspaceAccessToken;
+}
+
+const RECONNECT_MESSAGE = "This Google connection needs to be reconnected in Settings → Google.";
+
+interface DriveTokenTarget {
+  ref: FirebaseFirestore.DocumentReference;
+  data: FirebaseFirestore.DocumentData;
+  refresh: (refreshTokenValue: string) => Promise<{ accessToken: string; expiresIn: number }>;
+}
+
+async function loadTokenTarget(
+  uid: string,
+  connectionId: string,
+  dependencies: Partial<DriveAccessTokenDependencies>,
+): Promise<DriveTokenTarget> {
+  const resolved = await resolveDriveConnectionId(uid, connectionId);
+  if (!resolved) throw new DriveConnectionError("not_found", "This Google connection no longer exists. Reconnect it in Settings → Google.");
+
+  if (resolved.kind === "legacy") {
+    const ref = connectionsRef(uid).doc(resolved.id);
+    const snap = await ref.get();
+    if (!snap.exists) throw new DriveConnectionError("not_found", "This Google connection no longer exists. Reconnect it in Settings → Google.");
+    return { ref, data: snap.data()!, refresh: dependencies.refreshAccessToken ?? refreshAccessToken };
+  }
+
+  const ref = googleConnectionsRef(uid).doc(resolved.id);
+  const snap = await ref.get();
+  if (!snap.exists) throw new DriveConnectionError("not_found", "This Google connection no longer exists. Reconnect it in Settings → Google.");
+  const data = snap.data()!;
+  if (!googleDocHasDrive(data)) {
+    throw new DriveConnectionError("invalid", "Google Drive access is not turned on for this connection. Add it in Settings → Google.");
+  }
+  return { ref, data, refresh: dependencies.refreshGoogleAccessToken ?? refreshWorkspaceAccessToken };
 }
 
 /** Returns a cached access token when it has more than 60 seconds remaining.
@@ -135,19 +215,12 @@ export async function getAccessTokenForConnection(
 ): Promise<string> {
   const key = accessTokenCacheKey(uid, connectionId);
   return accessTokenCache.get(key, async () => {
-    const ref = connectionsRef(uid).doc(connectionId);
-    const snap = await ref.get();
-    if (!snap.exists) throw new DriveConnectionError("not_found", "This Google Drive connection no longer exists. Reconnect it in Settings → Google Drive.");
+    const { ref, data, refresh } = await loadTokenTarget(uid, connectionId, dependencies);
+    if (data.status === "invalid") throw new DriveConnectionError("invalid", RECONNECT_MESSAGE);
 
-    const data = snap.data()!;
-    if (data.status === "invalid") {
-      throw new DriveConnectionError("invalid", "This Google Drive connection needs to be reconnected in Settings → Google Drive.");
-    }
-
-    const refreshToken = decryptApiKey(data.encryptedRefreshToken);
+    const refreshTokenValue = decryptApiKey(data.encryptedRefreshToken);
     try {
-      const refresh = dependencies.refreshAccessToken ?? refreshAccessToken;
-      const { accessToken, expiresIn } = await refresh(refreshToken);
+      const { accessToken, expiresIn } = await refresh(refreshTokenValue);
       const now = Date.now();
       const storedLastUsedAt = typeof data.lastUsedAt?.toMillis === "function" ? data.lastUsedAt.toMillis() : 0;
       const lastWrittenAt = Math.max(storedLastUsedAt, lastUsedWriteAt.get(key) ?? 0);
@@ -168,7 +241,7 @@ export async function getAccessTokenForConnection(
       if (isGoogleAuthInvalid(error)) {
         invalidateAccessToken(uid, connectionId);
         await ref.update({ status: "invalid" });
-        throw new DriveConnectionError("invalid", "This Google Drive connection needs to be reconnected in Settings → Google Drive.");
+        throw new DriveConnectionError("invalid", RECONNECT_MESSAGE);
       }
       throw new DriveConnectionError("network", "Couldn't reach Google Drive. Try again in a moment.");
     }

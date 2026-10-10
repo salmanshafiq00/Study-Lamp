@@ -1,6 +1,6 @@
 import type { PlanItem, SyncResolution } from "@/lib/sync/plan";
 import type { RemovalApplyResult, RemovalPreviewResult, RemovalScope, RemovalTarget } from "@/lib/googleRemovalFlow";
-import type { GoogleConnectionSummary, GoogleSyncHistoryEntry, GoogleSyncStatus, GoogleTasksStatus, GoogleWorkspaceFeature } from "@/types";
+import type { GoogleConnectionSummary, GoogleSyncHistoryEntry, GoogleSyncStatus, GoogleTasksStatus, GoogleWorkspaceFeature, GoogleFeature } from "@/types";
 
 /** An API failure that keeps the HTTP status and the server's machine-readable `code` (for example "ambiguous"). */
 export class GoogleApiError extends Error {
@@ -41,7 +41,7 @@ export async function listGoogleConnections(idToken: string): Promise<GoogleConn
 
 /** W2: starts the OAuth flow for the requested features and navigates the
  *  whole page to the server-built Google auth URL. */
-export async function startGoogleConnect(idToken: string, features: GoogleWorkspaceFeature[]): Promise<void> {
+export async function startGoogleConnect(idToken: string, features: GoogleFeature[]): Promise<void> {
   const res = await fetch("/api/google/auth/state", {
     method: "POST",
     headers: authHeaders(idToken, true),
@@ -305,3 +305,45 @@ export async function applyGoogleRemoval(
   }
   return (await parseOrThrow(res)) as RemovalApplyResult;
 }
+
+/** G7: how many old Drive records can be deleted safely (their unified twin exists), and how many are kept. */
+export async function getLegacyDriveCleanupStatus(idToken: string): Promise<{ deletable: number; blocked: number }> {
+  const res = await fetch("/api/google/cleanup-drive", { headers: authHeaders(idToken) });
+  const data = await parseOrThrow(res);
+  return { deletable: Number(data.deletable) || 0, blocked: Number(data.blocked) || 0 };
+}
+
+/** G7: deletes the old Drive records that are safe to delete. Only call after the user confirmed the count. */
+export async function runLegacyDriveCleanup(idToken: string): Promise<{ deleted: number; blocked: number }> {
+  const res = await fetch("/api/google/cleanup-drive", { method: "POST", headers: authHeaders(idToken, true), body: JSON.stringify({ confirm: true }) });
+  const data = await parseOrThrow(res);
+  return { deleted: Number(data.deleted) || 0, blocked: Number(data.blocked) || 0 };
+}
+
+export interface DriveMigrationStatus {
+  /** Old Drive connections that still need to be moved onto the unified Google connection. */
+  pending: number;
+}
+
+export interface DriveMigrationResult {
+  counts: { migrated: number; already_migrated: number; needs_drive_consent: number; skipped_invalid: number; verify_failed: number };
+}
+
+/** G5: how many old Drive connections are waiting to be moved (one cheap read). */
+export async function getDriveMigrationStatus(idToken: string): Promise<DriveMigrationStatus> {
+  const res = await fetch("/api/google/migrate-drive", { headers: authHeaders(idToken) });
+  const data = await parseOrThrow(res);
+  return { pending: typeof data.pending === "number" ? data.pending : 0 };
+}
+
+/** G5: moves old Drive connections onto the unified connection. Only call after the user confirmed the count. */
+export async function runDriveMigration(idToken: string): Promise<DriveMigrationResult> {
+  const res = await fetch("/api/google/migrate-drive", {
+    method: "POST",
+    headers: authHeaders(idToken, true),
+    body: JSON.stringify({ confirm: true }),
+  });
+  const data = await parseOrThrow(res);
+  return { counts: data.counts };
+}
+

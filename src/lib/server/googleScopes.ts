@@ -5,8 +5,14 @@
 export {
   GOOGLE_WORKSPACE_SCOPES,
   GOOGLE_USERINFO_EMAIL_SCOPE,
+  GOOGLE_DRIVE_SCOPE,
+  isGoogleFeature,
+  scopesForGoogleFeatures,
+  googleFeaturesFromGrantedScopes,
+  missingGoogleFeatures,
   scopesForFeatures,
   featuresFromGrantedScopes,
   missingFeatures,
   type GoogleWorkspaceFeature,
+  type GoogleFeature,
 } from "@/lib/googleScopes";

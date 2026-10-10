@@ -27,11 +27,12 @@ export async function disconnectDrive(idToken: string, connectionId: string): Pr
   await parseOrThrow(res);
 }
 
-/** Kicks off the OAuth connect flow and navigates to the server-built Google
- *  auth URL. Google eventually redirects back to /settings/google (Drive card) via our own
- *  /api/drive/auth/callback route. */
+/** Kicks off the OAuth connect flow for Drive and navigates to the server-built Google auth URL.
+ *  Since G5 this is the unified Google flow with only the Drive feature: Google asks for drive.file alone
+ *  (include_granted_scopes keeps any Calendar/Tasks grant) and redirects back to /settings/google?tab=drive
+ *  through /api/google/auth/callback. */
 export async function startDriveConnect(idToken: string): Promise<void> {
-  const res = await fetch("/api/drive/auth/state", { method: "POST", headers: authHeaders(idToken) });
+  const res = await fetch("/api/google/auth/state", { method: "POST", headers: authHeaders(idToken, true), body: JSON.stringify({ features: ["drive"] }) });
   const data = await parseOrThrow(res);
   if (typeof data.url !== "string" || !data.url.startsWith("https://accounts.google.com/")) {
     throw new Error("Google Drive returned an invalid authorization URL.");

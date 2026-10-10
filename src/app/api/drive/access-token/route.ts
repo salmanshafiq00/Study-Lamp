@@ -23,7 +23,7 @@ export const GET = withAuthedRoute(async ({ uid, req }) => {
     // The Picker's App ID must be the Google Cloud project NUMBER that owns the OAuth client that minted
     // this token. That number is the digits before the first "-" in the client id, so derive it here
     // instead of relying on the Firebase sender id (which differs when the OAuth client lives in another project).
-    const appId = pickerAppIdFromClientId(getGoogleClient("drive")?.clientId);
+    const appId = pickerAppIdFromClientId(getGoogleClient()?.clientId);
     return NextResponse.json({ accessToken, appId });
   } catch (err) {
     if (err instanceof DriveConnectionError) {

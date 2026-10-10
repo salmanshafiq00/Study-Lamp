@@ -579,6 +579,8 @@ export interface DriveConnectionSummary {
 }
 
 export type GoogleWorkspaceFeature = "calendar" | "tasks";
+/** Step G5: Drive joins the same connection (see src/lib/googleScopes.ts). */
+export type GoogleFeature = GoogleWorkspaceFeature | "drive";
 
 export interface GoogleSyncCounts {
   synced: number;
@@ -644,6 +646,8 @@ export interface GoogleConnectionSummary {
   grantedScopes: GoogleWorkspaceFeature[];
   calendarEnabled: boolean;
   tasksEnabled: boolean;
+  /** Step G5: this same connection also has Google Drive (drive.file) turned on. */
+  driveGranted?: boolean;
   createdAt: string | null;
   lastUsedAt: string | null;
 }

@@ -103,6 +103,11 @@ export function DisconnectGoogleDialog({
           </span>
         </label>
       )}
+      {connection?.driveGranted && (
+        <p className="text-xs text-muted-foreground">
+          This connection also has Google Drive turned on. Disconnecting removes Drive access too, so files imported from this account stop opening until you reconnect.
+        </p>
+      )}
       {loadingCounts && <p className="text-xs text-muted-foreground">Checking what Study Lamp created…</p>}
     </ConfirmActionDialog>
   );

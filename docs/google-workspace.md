@@ -19,15 +19,14 @@ number inside the client id; a key from another project makes the Picker show no
    - `http://localhost:3000`
    - `https://studylamp.vercel.app` (your production origin)
 5. **Authorised redirect URIs**. Google compares them character by character, so scheme, host, port,
-   path and trailing slash must match. Add all four while the Drive and Google flows still have
-   separate callback routes:
+   path and trailing slash must match. Exactly two, one per origin:
 
    | URI | Used by |
    | --- | --- |
-   | `http://localhost:3000/api/drive/auth/callback` | Drive, local |
-   | `https://studylamp.vercel.app/api/drive/auth/callback` | Drive, production |
-   | `http://localhost:3000/api/google/auth/callback` | Calendar and Tasks, local |
-   | `https://studylamp.vercel.app/api/google/auth/callback` | Calendar and Tasks, production |
+   | `http://localhost:3000/api/google/auth/callback` | Drive, Calendar and Tasks, local |
+   | `https://studylamp.vercel.app/api/google/auth/callback` | Drive, Calendar and Tasks, production |
+
+   The old `/api/drive/auth/callback` URIs are no longer used (removed in G7); delete them from the client.
 
    Replace `studylamp.vercel.app` with your own domain. Vercel preview domains change on every
    deploy and cannot be listed, so test OAuth on localhost or production only.
@@ -69,14 +68,13 @@ Add these server-only variables (see `docs/deploy.md` for the full list):
 | --- | --- |
 | `GOOGLE_CLIENT_ID` | From the shared OAuth client. Used by Drive AND Workspace. |
 | `GOOGLE_CLIENT_SECRET` | Same client. |
-| `GOOGLE_WORKSPACE_OAUTH_STATE_SECRET` | Generate with `openssl rand -base64 32`. Signs the OAuth `state`. |
-| `GOOGLE_DRIVE_OAUTH_STATE_SECRET` | A different random value. Signs the Drive OAuth `state`. |
+| `GOOGLE_OAUTH_STATE_SECRET` | Generate with `openssl rand -base64 32`. Signs the OAuth `state` of every flow. |
+| `GOOGLE_WORKSPACE_OAUTH_STATE_SECRET` | Old name, only read when `GOOGLE_OAUTH_STATE_SECRET` is not set. |
 
-The legacy names (`GOOGLE_DRIVE_CLIENT_ID/SECRET`, `GOOGLE_WORKSPACE_CLIENT_ID/SECRET`)
-are still read when `GOOGLE_CLIENT_ID/SECRET` are not set, so existing deployments keep working.
-The two state secrets stay **separate** and must never hold the same value. Only the Workspace
-`state` HMAC is domain-separated (a `workspace.v1|` prefix); the Drive `state` has no prefix. Keeping
-the two secrets different is what stops a state signed for one flow from verifying in the other.
+The old `GOOGLE_WORKSPACE_CLIENT_ID/SECRET` names are still read when `GOOGLE_CLIENT_ID/SECRET` are not set.
+The `GOOGLE_DRIVE_CLIENT_ID/SECRET` and `GOOGLE_DRIVE_OAUTH_STATE_SECRET` names are no longer read (G7): if only
+those were set, copy their values to `GOOGLE_CLIENT_ID/SECRET` and `GOOGLE_OAUTH_STATE_SECRET`.
+One state secret is enough. The signed `state` HMAC carries a `workspace.v1|` prefix (a test pins this).
 
 The Drive Picker needs `NEXT_PUBLIC_GOOGLE_PICKER_API_KEY` from the **same Cloud project** as the client
 (the Picker App ID is the project number inside the client id).
@@ -101,6 +99,31 @@ The Picker shows one tab per file type, named by Google, not by Study Lamp
 Which tabs appear depends on the dialog: the video dialog shows only Videos, the study-material
 dialogs show the document tabs. With the narrow `drive.file` scope the Picker can list files, but
 Study Lamp only gets access to the files you select. Do not widen the scope to change that.
+
+### One connection (Drive, Calendar, Tasks)
+
+Since G5 one Google account is one document, `users/{uid}/googleConnections/{id}`, with the features it has
+in `grantedScopes` (`drive`, `calendar`, `tasks`). Connecting Drive from the Drive card runs the normal Google
+flow with only the Drive feature, so Google asks only for `drive.file` and keeps what was granted before.
+
+Existing Drive connections (`users/{uid}/driveConnections`) keep working. Documents store the old id in
+`driveConnectionId`; Study Lamp resolves that id to the unified connection after the migration, so no document is
+rewritten. On **Settings → Google → Google Drive** a **Merge into Google connection** button appears while old
+connections remain. It asks for confirmation, then for each old connection:
+
+| Situation | Result |
+| --- | --- |
+| No unified connection for that account | A new one is created from the old token (verified first). |
+| A unified connection with Drive already exists | The two are linked; the unified token is kept. |
+| A unified connection exists but has no Drive (account also uses Calendar or Tasks) | Nothing changes. Use **Connect Google Drive** for that account (Google asks only for Drive), then merge again. |
+| The token or the Study Lamp data folder cannot be verified | Nothing is written for that account. |
+
+Nothing is deleted by the migration. Once every old connection is moved, **Clean up old Drive records** (same card)
+deletes only the old `driveConnections` docs whose unified twin points back to them. It never revokes a token and never
+touches imported documents.
+
+Nothing is deleted by the migration. Disconnecting a Drive connection that Calendar or Tasks also use only switches
+Drive off; disconnecting the whole account in the Calendar card removes Drive access too.
 
 ## 5. Scopes used
 
@@ -229,7 +252,7 @@ All of these are server-only in `firestore.rules`.
 
 | Symptom | Cause and fix |
 | --- | --- |
-| `redirect_uri_mismatch` | The redirect URI Study Lamp sent is not in the client's list. It must match exactly: `http` vs `https`, `localhost:3000` vs another port, a trailing slash, and the path (`/api/drive/auth/callback` for Drive, `/api/google/auth/callback` for Calendar and Tasks). Check `NEXT_PUBLIC_APP_URL`. Preview deployments cannot work. |
+| `redirect_uri_mismatch` | The redirect URI Study Lamp sent is not in the client's list. It must match exactly: `http` vs `https`, `localhost:3000` vs another port, a trailing slash, and the path (always `/api/google/auth/callback`). Check `NEXT_PUBLIC_APP_URL`. Preview deployments cannot work. |
 | Picker opens empty or does not open | The `NEXT_PUBLIC_GOOGLE_PICKER_API_KEY` referrer list does not include the current origin, the key is not allowed to call the Picker API, or the key and the OAuth client are in different Cloud projects (wrong project number). Fix the key, then reload. |
 | "Needs reconnect" / `invalid_grant` | Refresh token revoked or expired. Use **Reconnect** on that card. |
 | Reconnect needed about once a week | The consent screen is in *Testing* status: Google expires refresh tokens after 7 days. Publish the app, or reconnect within 7 days. |
