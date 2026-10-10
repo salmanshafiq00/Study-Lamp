@@ -7,7 +7,7 @@
  */
 import { createPersister, type Persister } from "@/lib/persistThrottle";
 
-export type BlobKind = "annotations" | "doctext" | "transcript" | "backup";
+export type BlobKind = "annotations" | "doctext" | "transcript" | "backup" | "summary" | "note";
 export type SaveState = "saved" | "saving" | "offline";
 export interface SaveStatus { state: SaveState; code?: string }
 

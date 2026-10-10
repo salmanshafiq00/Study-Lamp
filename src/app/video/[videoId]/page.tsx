@@ -102,7 +102,9 @@ function VideoPageContent() {
   const load = React.useCallback(async () => {
     if (!user || !playlistId) return;
     setLoading(true);
-    const [p, vids, s, n, sm, bm, tr] = await Promise.all([
+    let results;
+    try {
+      results = await Promise.all([
       getPlaylist(playlistId),
       listVideos(playlistId),
       getUserVideoState(user.uid, videoId),
@@ -111,6 +113,12 @@ function VideoPageContent() {
       listBookmarks(user.uid, videoId),
       getTranscript(user.uid, videoId),
     ]);
+    } catch (error: any) {
+      toast.error(error?.message || "Failed to load this video.");
+      setLoading(false);
+      return;
+    }
+    const [p, vids, s, n, sm, bm, tr] = results;
     setPlaylistVideos(vids);
     setPlaylistTitle(p?.title || "Current playlist");
     setVideo(vids.find((v) => v.id === videoId) || null);

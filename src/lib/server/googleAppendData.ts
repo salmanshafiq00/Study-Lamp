@@ -1,3 +1,5 @@
+import { readStoredTextServer } from "@/lib/server/largeTextServer";
+import { realBlobDeps } from "@/lib/server/blobRouteDeps";
 import admin from "firebase-admin";
 import { adminDb } from "@/lib/server/firebase-admin";
 import { getDocumentQuiz } from "@/lib/server/quiz";
@@ -62,11 +64,11 @@ export async function loadDocumentAttempts(uid: string, documentId: string): Pro
 export async function loadDocAppendInputs(uid: string, documentId: string, kind: GoogleDocAppendKind): Promise<DocAppendSourceData> {
   if (kind === "summary") {
     const snap = await userRef(uid).collection("summaries").doc(`d_${documentId}`).get();
-    return { summaryHtml: typeof snap.data()?.content === "string" ? snap.data()!.content : "" };
+    return { summaryHtml: await readStoredTextServer(realBlobDeps, uid, snap.data()) };
   }
   if (kind === "notes") {
     const snap = await userRef(uid).collection("notes").doc(`d_${documentId}`).get();
-    return { note: typeof snap.data()?.content === "string" ? snap.data()!.content : "" };
+    return { note: await readStoredTextServer(realBlobDeps, uid, snap.data()) };
   }
   const [attempts, quiz] = await Promise.all([loadDocumentAttempts(uid, documentId), getDocumentQuiz(uid, documentId).catch(() => null)]);
   const questions: QuizQuestionRecord[] = (quiz?.questions ?? []).map((question) => ({

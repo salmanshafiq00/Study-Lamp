@@ -6,7 +6,7 @@ import { usePathname, useSearchParams } from "next/navigation";
 import {
   LayoutDashboard, ListVideo, Clock, Star, Flag, PlayCircle, BookOpenCheck, Share2,
   ShieldCheck, Users, FolderKanban, Tags, Target, Compass, X, Settings, ChevronDown, Sparkles,
-  HardDrive, FileText, FileSpreadsheet, DatabaseBackup, CalendarRange,
+  HardDrive, FileText, FileSpreadsheet, DatabaseBackup, CalendarRange, Database,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/components/auth/AuthProvider";
@@ -130,6 +130,7 @@ export function Sidebar({ mobileOpen, onClose }: { mobileOpen?: boolean; onClose
             <SidebarLink href="/settings/drive" label="Google Drive" icon={HardDrive} active={pathname.startsWith("/settings/drive")} onClick={onClose} />
             <SidebarLink href="/settings/google" label="Google Workspace" icon={CalendarRange} active={pathname.startsWith("/settings/google")} onClick={onClose} />
             <SidebarLink href="/settings/backup" label="Backups" icon={DatabaseBackup} active={pathname.startsWith("/settings/backup")} onClick={onClose} />
+            <SidebarLink href="/settings/storage" label="Storage" icon={Database} active={pathname.startsWith("/settings/storage")} onClick={onClose} />
             {isAdmin && (
               <SidebarLink href="/settings/tags" label="Tags" icon={Tags} active={pathname.startsWith("/settings/tags")} onClick={onClose} />
             )}

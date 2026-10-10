@@ -48,6 +48,8 @@ export const DELETE = withAuthedRoute<RouteParams["params"]>(async ({ uid, param
       // P4: trash this document's Drive blobs (never a hard delete) and drop their pointers.
       realBlobDeps.del(uid, "annotations", documentId),
       realBlobDeps.del(uid, "doctext", documentId),
+      realBlobDeps.del(uid, "summary", `d_${documentId}`),
+      realBlobDeps.del(uid, "note", `d_${documentId}`),
       // The server-only thumbnail goes too, unless another record still uses the same Drive file.
       typeof driveFileId === "string" && typeof driveConnectionId === "string"
         ? removeThumbnailIfUnreferenced(uid, driveConnectionId, driveFileId)

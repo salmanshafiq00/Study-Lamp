@@ -1,4 +1,6 @@
-import { deleteDoc, doc, getDoc, serverTimestamp, setDoc } from "@/lib/firestore/instrumented";
+import { deleteDoc, doc, getDoc } from "@/lib/firestore/instrumented";
+import { discardStoredBlob, persistText, resolveStoredText, type ResolveOptions } from "@/lib/firestore/largeText";
+import { planTextStorage } from "@/lib/firestore/inlineLimit";
 import { db } from "@/lib/firebase";
 import type { VideoTranscript } from "@/types";
 
@@ -16,24 +18,30 @@ import type { VideoTranscript } from "@/types";
  * captions — YouTube videos keep using the transcript API directly and
  * never need this.
  */
-export async function getTranscript(uid: string, videoId: string): Promise<VideoTranscript | null> {
+export async function getTranscript(uid: string, videoId: string, options?: ResolveOptions): Promise<VideoTranscript | null> {
   const snap = await getDoc(doc(db, "users", uid, "transcripts", videoId));
-  return snap.exists() ? (snap.data() as VideoTranscript) : null;
+  if (!snap.exists()) return null;
+  const data = snap.data() as VideoTranscript;
+  const { text, truncated } = await resolveStoredText(uid, data, options);
+  return truncated ? { ...data, content: text, truncated: true } : { ...data, content: text };
 }
 
+/** Over 20 KB the transcript goes to the Drive blob store (roadmap P5); Firestore keeps a pointer and a preview. */
 export async function saveTranscript(uid: string, videoId: string, content: string) {
   const trimmed = (content || "").trim();
   if (!trimmed) {
     await deleteTranscript(uid, videoId);
     return;
   }
-  await setDoc(
-    doc(db, "users", uid, "transcripts", videoId),
-    { videoId, content: trimmed, updatedAt: serverTimestamp() },
-    { merge: true }
-  );
+  await persistText({
+    uid, collection: "transcripts", docId: videoId, kind: "transcript", text: trimmed,
+    plan: planTextStorage("transcript", videoId, trimmed), fields: { videoId },
+  });
 }
 
 export async function deleteTranscript(uid: string, videoId: string) {
-  await deleteDoc(doc(db, "users", uid, "transcripts", videoId));
+  const ref = doc(db, "users", uid, "transcripts", videoId);
+  const snap = await getDoc(ref).catch(() => null);
+  await deleteDoc(ref);
+  if (snap?.exists()) discardStoredBlob(uid, snap.data());
 }

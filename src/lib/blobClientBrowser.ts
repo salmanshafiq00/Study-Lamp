@@ -37,3 +37,8 @@ export async function clearLocalBlobs(): Promise<void> {
   if (active) await active.clearLocal();
   else await createIndexedDbBlobStore().clearAll();
 }
+
+/** Best-effort remote delete (trashes the Drive file and drops the pointer). Never throws. */
+export async function deleteRemoteBlob(kind: string, key: string): Promise<void> {
+  try { await request("DELETE", kind, key); } catch { /* the pointer cleanup in P6 / document delete covers leftovers */ }
+}

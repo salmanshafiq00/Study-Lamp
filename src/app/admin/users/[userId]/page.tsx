@@ -116,7 +116,7 @@ function AdminUserDetailContent() {
   }
 
   async function openNoteDialog(v: VideoWithState) {
-    const [n, s] = await Promise.all([getNote(userId, v.id), getSummary(userId, v.id)]);
+    const [n, s] = await Promise.all([getNote(userId, v.id, { allowPreview: true }), getSummary(userId, v.id, { allowPreview: true })]);
     setNoteContent(n?.content || "");
     setSummaryContent(s?.content || "");
     setNoteDialogVideo(v);

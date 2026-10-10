@@ -89,3 +89,9 @@ Every Google write (Calendar, Tasks, Docs, Sheets) goes through preview -> confi
   Only ids from the user's own mapping docs, for one connection and its stored calendar/list, can be deleted.
 - **Server-only collections** (client read/write denied): `googleConnections`, `googleSync`, `googleSyncLog`,
   `googleIgnored`, `googleUsedTokens`.
+
+## Blob-store allowlist (D15, updated by roadmap P5/P6)
+
+- Kinds: `annotations`, `doctext`, `transcript`, `backup`, `summary`, `note`. File names must match `^(annotations|doctext|transcript|backup|summary|note)-[A-Za-z0-9_-]{1,80}\.json$`, parent = the stored "Study Lamp data" folder id, size caps per kind (summary/note 1 MB).
+- `summary`/`note` were added in P5 so text over 20 KB can leave Firestore; the allowlist is otherwise unchanged.
+- Cleanup (P6) runs only through `/api/storage/*`, requires `confirm: true`, deletes at most 400 documents per call and never touches Drive files.

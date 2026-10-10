@@ -298,6 +298,12 @@ export interface UserVideoState {
 }
 
 export interface VideoNote {
+  /** P5: set when the full text lives in Drive but only the preview could be loaded (another user's data). */
+  truncated?: boolean;
+  /** P5 pointer fields: text over 20 KB is stored in the Drive blob store; `content` is then only a preview. */
+  blobKind?: "summary" | "note" | "transcript";
+  blobKey?: string;
+  bytes?: number;
   videoId: string;
   content: string;
   pageNumber?: number | null;
@@ -305,6 +311,12 @@ export interface VideoNote {
 }
 
 export interface VideoSummary {
+  /** P5: set when the full text lives in Drive but only the preview could be loaded (another user's data). */
+  truncated?: boolean;
+  /** P5 pointer fields: text over 20 KB is stored in the Drive blob store; `content` is then only a preview. */
+  blobKind?: "summary" | "note" | "transcript";
+  blobKey?: string;
+  bytes?: number;
   videoId: string;
   content: string;
   updatedAt: Timestamp | null;
@@ -315,6 +327,12 @@ export interface VideoSummary {
  *  Used as a fallback source for any video with no official captions
  *  (see src/lib/ai/universalTranscript.ts). */
 export interface VideoTranscript {
+  /** P5: set when the full text lives in Drive but only the preview could be loaded (another user's data). */
+  truncated?: boolean;
+  /** P5 pointer fields: text over 20 KB is stored in the Drive blob store; `content` is then only a preview. */
+  blobKind?: "summary" | "note" | "transcript";
+  blobKey?: string;
+  bytes?: number;
   videoId: string;
   content: string;
   updatedAt: Timestamp | null;

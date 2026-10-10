@@ -44,3 +44,10 @@ Not measured yet: it needs a browser session with real data. Fill this table wit
 | PDF annotations | up to 850 KB | **moved to Drive blob store (P4)** |
 | extracted document text (`content/*` chunks) | large | **move to blob store (P5, not done yet)** |
 | transcripts, summaries, notes, quiz JSON | unknown | measure with `firestoreSizes.ts`, then move anything > 20 KB (P5) |
+
+## P5 / P6 notes
+
+- Extracted document text: no `content/*` chunk writes any more; cache = `doctext` Drive blob (1 pointer read per extraction, +1 pointer write when cold). Legacy chunks are read once, copied, hash-verified, then deleted.
+- Notes, summaries and transcripts over 20 KB: Firestore keeps `{content: preview, blobKind, blobKey, bytes, preview}`; full text is in Drive. Without Drive and under 50,000 characters the text is written inline instead.
+- Not moved: quiz JSON (shared playlist quizzes are not one user's data; a quiz is capped at 50 questions by rules).
+- `/settings/storage`: health page = 12 count aggregations (about 12 reads); each cleanup preview = 1 count (+200 index reads for the keep-newest rules); thumbnails scan up to 3,000 ids.

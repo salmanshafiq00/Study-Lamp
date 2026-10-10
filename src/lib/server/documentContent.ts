@@ -2,9 +2,11 @@ import { adminDb } from "@/lib/server/firebase-admin";
 import { withDriveAccessToken } from "@/lib/server/driveConnections";
 import { fetchDocumentBytes, getFileMetadata } from "@/lib/server/googleDrive";
 import { extractDocumentText, MAX_DOCUMENT_BYTES } from "@/lib/server/documentText";
-import { isSameDriveRevision } from "@/lib/server/documentContentUtils";
 import { hashDocumentText } from "@/lib/server/sourceHash";
-import { chunkDocId, joinTextChunks, splitTextIntoChunks } from "@/lib/server/textChunks";
+import { resolveDocumentText } from "@/lib/server/docTextCache";
+import { isSameDriveRevision } from "@/lib/server/documentContentUtils";
+import { realBlobDeps } from "@/lib/server/blobRouteDeps";
+import { chunkDocId, joinTextChunks } from "@/lib/server/textChunks";
 import admin from "firebase-admin";
 import type { DocumentFileType } from "@/types";
 
@@ -69,54 +71,73 @@ async function readDocumentBytes(response: Response): Promise<Buffer> {
   return Buffer.concat(chunks.map((chunk) => Buffer.from(chunk)));
 }
 
-/** Reuses extracted text while Drive's content revision remains unchanged. */
+/**
+ * Reads the pre-P5 Firestore text cache (content/meta + content/text_N chunks, or the older single content/text doc).
+ * Read-only compatibility path: nothing is written to these documents any more.
+ */
+export async function readLegacyDocumentText(uid: string, documentId: string, revision: { md5Checksum?: string | null; modifiedTime?: string | null }): Promise<string | null> {
+  const contentCol = adminDb.collection("users").doc(uid).collection("personalDocuments").doc(documentId).collection("content");
+  const [metaSnapshot, legacySnapshot] = await Promise.all([contentCol.doc("meta").get(), contentCol.doc("text").get()]);
+  const meta = metaSnapshot.data();
+  if (meta && Number.isInteger(meta.chunks) && meta.chunks > 0 && isSameDriveRevision(meta, revision)) {
+    const chunkSnapshots = await Promise.all(Array.from({ length: meta.chunks }, (_, i) => contentCol.doc(chunkDocId(i)).get()));
+    const parts = chunkSnapshots.map((snapshot) => snapshot.data()?.text);
+    if (parts.every((part): part is string => typeof part === "string")) {
+      const text = joinTextChunks(parts);
+      if (hashDocumentText(text) === meta.textHash) return text;
+    }
+  }
+  const legacy = legacySnapshot.data();
+  if (typeof legacy?.text === "string" && isSameDriveRevision(legacy, revision)) return legacy.text;
+  return null;
+}
+
+/** Deletes every pre-P5 content/* document of one personal document (batches of 400). */
+export async function deleteLegacyDocumentText(uid: string, documentId: string): Promise<number> {
+  const contentCol = adminDb.collection("users").doc(uid).collection("personalDocuments").doc(documentId).collection("content");
+  const refs = await contentCol.listDocuments();
+  for (let start = 0; start < refs.length; start += 400) {
+    const batch = adminDb.batch();
+    refs.slice(start, start + 400).forEach((ref) => batch.delete(ref));
+    await batch.commit();
+  }
+  return refs.length;
+}
+
+/**
+ * P5: reuses extracted text while Drive's content revision is unchanged. The cache is the "doctext" Drive blob
+ * (no Firestore chunk writes). Firestore cost: 1 pointer read (+1 pointer write on a cold extraction) and at most
+ * one update of the document's stored revision when it changed.
+ */
 export async function extractPersonalDocumentText(uid: string, doc: LoadedDocument): Promise<string> {
   const documentRef = adminDb.collection("users").doc(uid).collection("personalDocuments").doc(doc.id);
-  const contentCol = documentRef.collection("content");
-  const metaRef = contentCol.doc("meta");
-  const legacyRef = contentCol.doc("text"); // pre-chunking single document, still read for backward compatibility
 
   return withDriveAccessToken(uid, doc.driveConnectionId, async (accessToken) => {
     const metadata = await getFileMetadata(accessToken, doc.driveFileId);
     const revision = { md5Checksum: metadata.md5Checksum ?? null, modifiedTime: metadata.modifiedTime ?? null };
-    const [metaSnapshot, legacySnapshot] = await Promise.all([metaRef.get(), legacyRef.get()]);
-    const meta = metaSnapshot.data();
-    if (meta && Number.isInteger(meta.chunks) && meta.chunks > 0 && isSameDriveRevision(meta, revision)) {
-      const chunkSnapshots = await Promise.all(Array.from({ length: meta.chunks }, (_, i) => contentCol.doc(chunkDocId(i)).get()));
-      const parts = chunkSnapshots.map((snapshot) => snapshot.data()?.text);
-      if (parts.every((part): part is string => typeof part === "string")) {
-        const text = joinTextChunks(parts);
-        if (hashDocumentText(text) === meta.textHash) return text;
-      }
-      // A missing or corrupted chunk falls through to a fresh extraction.
-    }
-    const legacy = legacySnapshot.data();
-    if (typeof legacy?.text === "string" && isSameDriveRevision(legacy, revision)) {
-      return legacy.text; // migrated to chunks on the next extraction
-    }
-
-    const response = await fetchDocumentBytes(accessToken, {
-      driveFileId: doc.driveFileId,
-      mimeType: doc.mimeType || "application/octet-stream",
-      googleNative: Boolean(doc.googleNative),
-    });
-    if (!response.ok) throw new Error(`Couldn't download "${doc.title}" from Drive (${response.status}).`);
-    const bytes = await readDocumentBytes(response);
-    const text = await extractDocumentText(bytes, doc.fileType);
-    if (!text.trim()) throw new Error(`No readable text could be extracted from "${doc.title}".`);
-
-    const now = admin.firestore.FieldValue.serverTimestamp();
-    const chunks = splitTextIntoChunks(text);
-    const previousChunks = Number.isInteger(meta?.chunks) ? meta!.chunks as number : 0;
-
-    // Chunks, meta, legacy cleanup and stale-chunk cleanup commit together.
-    const batch = adminDb.batch();
-    chunks.forEach((part, index) => batch.set(contentCol.doc(chunkDocId(index)), { text: part }));
-    for (let index = chunks.length; index < previousChunks; index++) batch.delete(contentCol.doc(chunkDocId(index)));
-    if (legacySnapshot.exists) batch.delete(legacyRef);
-    batch.set(metaRef, { ...revision, chunks: chunks.length, textHash: hashDocumentText(text), updatedAt: now });
-    batch.update(documentRef, { ...revision, updatedAt: now });
-    await batch.commit();
-    return text;
+    const result = await resolveDocumentText({
+      async readBlob() { return (await realBlobDeps.get(uid, "doctext", doc.id))?.json ?? null; },
+      async writeBlob(blob) { await realBlobDeps.put(uid, "doctext", doc.id, JSON.stringify(blob)); },
+      readLegacy: (rev) => readLegacyDocumentText(uid, doc.id, rev),
+      async deleteLegacy() { await deleteLegacyDocumentText(uid, doc.id); },
+      async extract() {
+        const response = await fetchDocumentBytes(accessToken, {
+          driveFileId: doc.driveFileId,
+          mimeType: doc.mimeType || "application/octet-stream",
+          googleNative: Boolean(doc.googleNative),
+        });
+        if (!response.ok) throw new Error(`Couldn't download "${doc.title}" from Drive (${response.status}).`);
+        const bytes = await readDocumentBytes(response);
+        const text = await extractDocumentText(bytes, doc.fileType);
+        if (!text.trim()) throw new Error(`No readable text could be extracted from "${doc.title}".`);
+        return text;
+      },
+      async recordRevision(rev) {
+        // Skip the write when the record already holds this revision (free-tier rule: no write for an unchanged value).
+        if (isSameDriveRevision({ md5Checksum: doc.md5Checksum, modifiedTime: doc.modifiedTime }, rev)) return;
+        await documentRef.update({ ...rev, updatedAt: admin.firestore.FieldValue.serverTimestamp() });
+      },
+    }, revision);
+    return result.text;
   });
 }

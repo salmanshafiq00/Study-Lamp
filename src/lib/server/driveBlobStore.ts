@@ -4,17 +4,19 @@
  * Everything here is pure orchestration over injected deps (DriveBlobApi + BlobPointerStore) so it is unit-tested
  * with fakes. assertBlobWriteAllowed is the ONLY gate that lets these writes skip the preview dialog.
  */
-export const BLOB_KINDS = ["annotations", "doctext", "transcript", "backup"] as const;
+export const BLOB_KINDS = ["annotations", "doctext", "transcript", "backup", "summary", "note"] as const;
 export type BlobKind = (typeof BLOB_KINDS)[number];
 
 export const BLOB_KEY_PATTERN = /^[A-Za-z0-9_-]{1,80}$/;
-export const BLOB_NAME_PATTERN = /^(annotations|doctext|transcript|backup)-[A-Za-z0-9_-]{1,80}\.json$/;
+export const BLOB_NAME_PATTERN = /^(annotations|doctext|transcript|backup|summary|note)-[A-Za-z0-9_-]{1,80}\.json$/;
 export const BLOB_FOLDER_NAME = "Study Lamp data";
 export const BLOB_MAX_BYTES: Record<BlobKind, number> = {
   annotations: 2 * 1024 * 1024,
   doctext: 5 * 1024 * 1024,
   transcript: 5 * 1024 * 1024,
   backup: 5 * 1024 * 1024,
+  summary: 1024 * 1024,
+  note: 1024 * 1024,
 };
 
 export type BlobErrorCode =

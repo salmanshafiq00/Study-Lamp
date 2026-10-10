@@ -112,14 +112,22 @@ function PersonalVideoContent() {
   const load = React.useCallback(async () => {
     if (!ownerId) return;
     setLoading(true);
-    const [v, vids, n, sm, pl, tr] = await Promise.all([
+    let results;
+    try {
+      results = await Promise.all([
       getPersonalVideo(ownerId, playlistId, videoId),
       listPersonalVideos(ownerId, playlistId),
-      getNote(ownerId, noteKey(videoId)),
-      getSummary(ownerId, noteKey(videoId)),
+      getNote(ownerId, noteKey(videoId), { allowPreview: isViewingOther }),
+      getSummary(ownerId, noteKey(videoId), { allowPreview: isViewingOther }),
       getPersonalPlaylist(ownerId, playlistId),
-      getTranscript(ownerId, noteKey(videoId)),
+      getTranscript(ownerId, noteKey(videoId), { allowPreview: isViewingOther }),
     ]);
+    } catch (error: any) {
+      toast.error(error?.message || "Failed to load this video.");
+      setLoading(false);
+      return;
+    }
+    const [v, vids, n, sm, pl, tr] = results;
     setVideo(v);
     setPlaylistVideos(vids);
     setPlaylistTitle(pl?.title || "Current playlist");
@@ -128,7 +136,7 @@ function PersonalVideoContent() {
     setAutoPlay(!!pl?.autoPlay);
     setTranscript(tr?.content || "");
     setLoading(false);
-  }, [ownerId, playlistId, videoId]);
+  }, [ownerId, playlistId, videoId, isViewingOther]);
 
   React.useEffect(() => { load(); }, [load]);
 

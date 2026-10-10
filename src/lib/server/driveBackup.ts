@@ -1,3 +1,6 @@
+import { pointerOf } from "@/lib/firestore/inlineLimit";
+import { readStoredTextServer } from "@/lib/server/largeTextServer";
+import { realBlobDeps } from "@/lib/server/blobRouteDeps";
 import admin from "firebase-admin";
 import { adminDb } from "@/lib/server/firebase-admin";
 
@@ -46,6 +49,15 @@ export interface BackupPayload {
   quizAttempts: Array<{ id: string; data: Record<string, unknown> }>;
 }
 
+/** P5: a note/summary whose text lives in Drive is backed up with its FULL text inline (pointer fields dropped). */
+async function backupTextEntry(uid: string, d: FirebaseFirestore.QueryDocumentSnapshot): Promise<{ id: string; data: Record<string, unknown> }> {
+  const data = toPlain(d.data()) as Record<string, unknown>;
+  if (!pointerOf(data)) return { id: d.id, data };
+  const content = await readStoredTextServer(realBlobDeps, uid, data).catch(() => (typeof data.content === "string" ? data.content : ""));
+  const { blobKind: _k, blobKey: _b, bytes: _n, preview: _p, ...rest } = data;
+  return { id: d.id, data: { ...rest, content } };
+}
+
 export async function buildBackupPayload(uid: string): Promise<BackupPayload> {
   const userRef = adminDb.collection("users").doc(uid);
 
@@ -73,8 +85,8 @@ export async function buildBackupPayload(uid: string): Promise<BackupPayload> {
     createdAt: new Date().toISOString(),
     ownerId: uid,
     playlists,
-    notes: notesSnap.docs.map((d) => ({ id: d.id, data: toPlain(d.data()) as Record<string, unknown> })),
-    summaries: summariesSnap.docs.map((d) => ({ id: d.id, data: toPlain(d.data()) as Record<string, unknown> })),
+    notes: await Promise.all(notesSnap.docs.map((d) => backupTextEntry(uid, d))),
+    summaries: await Promise.all(summariesSnap.docs.map((d) => backupTextEntry(uid, d))),
     goals: goalsSnap.docs.map((d) => ({ id: d.id, data: toPlain(d.data()) as Record<string, unknown> })),
     quizAttempts: quizAttemptsSnap.docs.map((d) => ({ id: d.id, data: toPlain(d.data()) as Record<string, unknown> })),
   };
