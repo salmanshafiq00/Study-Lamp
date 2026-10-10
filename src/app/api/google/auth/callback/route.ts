@@ -28,6 +28,7 @@ function redirectAndClearNonce(settingsUrl: URL): NextResponse {
 // (no Authorization header — a plain top-level navigation). The signed `state`
 // plus the sl_google_nonce cookie tie it back to a Study Lamp user.
 export async function GET(request: NextRequest) {
+  // Settings → Google is the single page for Drive, Calendar and Tasks.
   const settingsUrl = new URL("/settings/google", request.url);
 
   if (!isWorkspaceConfigured()) {
@@ -59,6 +60,8 @@ export async function GET(request: NextRequest) {
     settingsUrl.searchParams.set("error", "This connection link expired or is invalid. Try connecting again.");
     return redirectAndClearNonce(settingsUrl);
   }
+  // Return to the card the user started from (the Google page scrolls to ?tab=calendar|tasks).
+  settingsUrl.searchParams.set("tab", verification.features[0] ?? "calendar");
 
   if (!checkRateLimit(verification.uid, { scope: "google:auth-callback", preset: "authSensitive" })) {
     settingsUrl.searchParams.set("error", "Too many connection attempts. Try again shortly.");

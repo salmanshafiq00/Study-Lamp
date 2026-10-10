@@ -75,7 +75,7 @@ After a clean week: set `CSP_MODE=enforce` in Vercel, redeploy, and recheck the 
 
 ## Thumbnail backfill
 
-`POST /api/drive/thumbnails/backfill` (Bearer Firebase ID token, signed-in user only) processes one batch for the **calling user** and returns `{ processed, remaining }`. Repeat the call until `remaining` is 0. The easiest way is the thumbnail refresh action in **Settings → Drive** (`src/app/settings/drive/page.tsx`), which loops over batches for you. Each user runs it for their own library.
+`POST /api/drive/thumbnails/backfill` (Bearer Firebase ID token, signed-in user only) processes one batch for the **calling user** and returns `{ processed, remaining }`. Repeat the call until `remaining` is 0. The easiest way is the thumbnail refresh action in **Settings → Google → Google Drive card** (`src/components/google/DriveCard.tsx`), which loops over batches for you. Each user runs it for their own library.
 
 ## Rate limiting
 

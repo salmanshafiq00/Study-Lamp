@@ -158,7 +158,7 @@ export function DriveImportPanel({
     return (
       <div className="space-y-2 rounded-md border border-dashed border-border p-4 text-center text-sm text-muted-foreground">
         <p>Connect a Google account first.</p>
-        <Button asChild variant="outline" size="sm"><a href="/settings/drive" target="_blank" rel="noopener noreferrer">Open Google Drive settings</a></Button>
+        <Button asChild variant="outline" size="sm"><a href="/settings/google#drive" target="_blank" rel="noopener noreferrer">Open Google settings</a></Button>
       </div>
     );
   }

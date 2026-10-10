@@ -25,7 +25,9 @@ export const dynamic = "force-dynamic";
 
 export async function GET(req: NextRequest) {
   const origin = req.nextUrl.origin;
-  const settingsUrl = new URL("/settings/drive", origin);
+  // Drive settings live on the single Google page; ?tab=drive makes it scroll to the Drive card.
+  const settingsUrl = new URL("/settings/google", origin);
+  settingsUrl.searchParams.set("tab", "drive");
 
   const error = req.nextUrl.searchParams.get("error");
   if (error) {

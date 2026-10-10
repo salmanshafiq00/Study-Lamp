@@ -18,7 +18,7 @@ export async function offerCalendarReview(user: { uid: string; getIdToken: () =>
       duration: 10_000,
     });
   } catch {
-    // Shown in Settings > Google Workspace when the user looks there.
+    // Shown in Settings > Google when the user looks there.
   }
 }
 
@@ -39,6 +39,6 @@ export async function offerTasksReview(user: { uid: string; getIdToken: () => Pr
       duration: 10_000,
     });
   } catch {
-    // Shown in Settings > Google Workspace when the user looks there.
+    // Shown in Settings > Google when the user looks there.
   }
 }

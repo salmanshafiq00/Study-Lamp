@@ -461,7 +461,7 @@ function ReaderFallback({
       <HardDrive className="h-8 w-8 text-muted-foreground" />
       <p className="max-w-md text-sm text-muted-foreground">{message}</p>
       {message.toLowerCase().includes("connection") && (
-        <Button asChild variant="outline" size="sm"><Link href="/settings/drive">Reconnect Google Drive</Link></Button>
+        <Button asChild variant="outline" size="sm"><Link href="/settings/google#drive">Reconnect Google</Link></Button>
       )}
       <div className="flex flex-wrap justify-center gap-2">
         {onRetry && <Button type="button" variant="outline" size="sm" onClick={onRetry} disabled={reloading}><RotateCw className="mr-1.5 h-4 w-4" />Try again</Button>}

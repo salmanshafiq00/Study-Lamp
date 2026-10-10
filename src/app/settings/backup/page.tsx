@@ -107,8 +107,8 @@ function BackupContent() {
       <AppShell>
         <div className="mx-auto max-w-2xl space-y-4">
           <h1 className="font-display text-2xl font-semibold">Backups</h1>
-          <p className="text-sm text-muted-foreground">Connect a Google Drive account first — see Settings → Google Drive.</p>
-          <Button asChild variant="outline" size="sm"><a href="/settings/drive">Go to Google Drive settings</a></Button>
+          <p className="text-sm text-muted-foreground">Connect a Google Drive account first — see Settings → Google.</p>
+          <Button asChild variant="outline" size="sm"><a href="/settings/google#drive">Go to Google settings</a></Button>
         </div>
       </AppShell>
     );

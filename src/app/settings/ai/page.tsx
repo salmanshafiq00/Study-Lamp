@@ -408,15 +408,15 @@ function AiConnectionsContent() {
             <div className="flex items-start gap-2.5">
               <CalendarRange className="mt-0.5 h-5 w-5 shrink-0 text-accent" />
               <div>
-                <h2 className="font-display text-base font-semibold">Google Workspace</h2>
+                <h2 className="font-display text-base font-semibold">Google</h2>
                 <p className="mt-1 text-sm text-muted-foreground">
-                  Connect Google Calendar and Tasks so Study Lamp can keep your study goals in step. It reads to check
-                  for changes and writes only after you confirm.
+                  Connect Google Drive, Calendar and Tasks. Calendar and Tasks keep your study goals in step: they read to check
+                  for changes and write only after you confirm.
                 </p>
               </div>
             </div>
             <Button asChild variant="outline" size="sm">
-              <a href="/settings/google">Open Google Workspace</a>
+              <a href="/settings/google">Open Google settings</a>
             </Button>
           </CardContent>
         </Card>

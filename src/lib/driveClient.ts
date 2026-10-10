@@ -28,7 +28,7 @@ export async function disconnectDrive(idToken: string, connectionId: string): Pr
 }
 
 /** Kicks off the OAuth connect flow and navigates to the server-built Google
- *  auth URL. Google eventually redirects back to /settings/drive via our own
+ *  auth URL. Google eventually redirects back to /settings/google (Drive card) via our own
  *  /api/drive/auth/callback route. */
 export async function startDriveConnect(idToken: string): Promise<void> {
   const res = await fetch("/api/drive/auth/state", { method: "POST", headers: authHeaders(idToken) });

@@ -66,7 +66,7 @@ export function GoogleAppendMenu({ doc }: { doc: PersonalDocument }) {
     } catch (caught) {
       const failure = toAppendError(caught);
       if (failure.code === "nothing_to_add") toast.info(failure.message);
-      else if (failure.code === "reconnect") toast.error(failure.message, { action: { label: "Reconnect", onClick: () => router.push("/settings/drive") } });
+      else if (failure.code === "reconnect") toast.error(failure.message, { action: { label: "Reconnect", onClick: () => router.push("/settings/google#drive") } });
       else toast.error(failure.message);
     } finally {
       setBusy(false);
@@ -113,7 +113,7 @@ export function GoogleAppendMenu({ doc }: { doc: PersonalDocument }) {
         </Button>
       )}
       {error.code === "reconnect" && (
-        <Button asChild variant="secondary"><a href="/settings/drive">Reconnect Google Drive</a></Button>
+        <Button asChild variant="secondary"><a href="/settings/google#drive">Reconnect Google</a></Button>
       )}
       {(error.code === "permission" || error.code === "not_found") && openUrl && (
         <Button asChild variant="secondary"><a href={openUrl} target="_blank" rel="noopener noreferrer">Open in Google</a></Button>

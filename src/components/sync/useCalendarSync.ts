@@ -156,7 +156,7 @@ export function useCalendarSync(options: UseCalendarSyncOptions = {}): CalendarS
         duration: 10_000,
       });
     } catch (error) {
-      // The goal was saved either way. "Several connections" shows as a banner; other problems are in Settings > Google Workspace.
+      // The goal was saved either way. "Several connections" shows as a banner; other problems are in Settings > Google.
       noteCheckError(error);
     }
   }, [user, currentConnectionId, noteCheckError]);
