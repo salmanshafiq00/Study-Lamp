@@ -2,7 +2,7 @@
 
 import * as React from "react";
 import { useAuth } from "@/components/auth/AuthProvider";
-import { getDriveAccessToken } from "@/lib/driveClient";
+import { getDrivePickerAuth } from "@/lib/driveClient";
 import { Button } from "@/components/ui/button";
 import { FolderOpen } from "lucide-react";
 import { toast } from "sonner";
@@ -36,7 +36,7 @@ function loadPickerScripts(): Promise<void> {
 }
 
 /** Reads the public Picker config, toasting a helpful message when it is missing. */
-function getPickerConfig(): { apiKey: string; appId: string } | null {
+function getPickerConfig(): { apiKey: string; fallbackAppId: string } | null {
   const apiKey = process.env.NEXT_PUBLIC_GOOGLE_PICKER_API_KEY;
   const appId = process.env.NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID;
   if (!apiKey) {
@@ -47,7 +47,7 @@ function getPickerConfig(): { apiKey: string; appId: string } | null {
     toast.error("Google Drive picker isn't configured on this deployment (missing Firebase project number).");
     return null;
   }
-  return { apiKey, appId };
+  return { apiKey, fallbackAppId: appId };
 }
 
 export interface DrivePickerSelection {
@@ -85,12 +85,14 @@ export function DrivePickerButton({
     if (!user) return;
     const config = getPickerConfig();
     if (!config) return;
-    const { apiKey, appId } = config;
+    const { apiKey, fallbackAppId } = config;
 
     setOpening(true);
     try {
       const idToken = await user.getIdToken();
-      const [accessToken] = await Promise.all([getDriveAccessToken(idToken, connectionId), loadPickerScripts()]);
+      const [auth] = await Promise.all([getDrivePickerAuth(idToken, connectionId), loadPickerScripts()]);
+      const accessToken = auth.accessToken;
+      const appId = auth.appId ?? fallbackAppId;
 
       const google = window.google;
       const views: any[] = [];
@@ -184,7 +186,9 @@ export async function openFolderChildrenPicker(options: {
 }): Promise<void> {
   const config = getPickerConfig();
   if (!config) return;
-  const [accessToken] = await Promise.all([getDriveAccessToken(options.idToken, options.connectionId), loadPickerScripts()]);
+  const [auth] = await Promise.all([getDrivePickerAuth(options.idToken, options.connectionId), loadPickerScripts()]);
+  const accessToken = auth.accessToken;
+  const appId = auth.appId ?? config.fallbackAppId;
 
   const google = window.google;
   const mimeTypes = buildPickerMimeTypes(options.kinds ?? ["video"]);
@@ -195,7 +199,7 @@ export async function openFolderChildrenPicker(options: {
   if (mimeTypes.length > 0) view.setMimeTypes(mimeTypes.join(","));
 
   new google.picker.PickerBuilder()
-    .setAppId(config.appId)
+    .setAppId(appId)
     .setOAuthToken(accessToken)
     .setDeveloperKey(config.apiKey)
     .setTitle(`Select the files to import from ${options.folderName} (Ctrl/Cmd+A selects all)`)

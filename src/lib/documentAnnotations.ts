@@ -4,6 +4,15 @@ export const MAX_BLOB_ANNOTATION_BYTES = 2 * 1024 * 1024;
 /** Legacy Firestore copy is only used as a fallback without Drive, and only when small (decision D16 spirit). */
 export const MAX_FALLBACK_FIRESTORE_ANNOTATION_BYTES = 200 * 1024;
 
+/**
+ * Only annotations a person draws themselves are saved. A PDF often already contains hundreds of
+ * link (2), popup (16) and form-widget (20) annotations per page; saving those made the file huge
+ * and they are re-created by the PDF itself on open. Subtype numbers follow PDFium (verify against
+ * the installed EmbedPDF version): text, free text, line, square, circle, polygon, polyline,
+ * highlight, underline, squiggly, strikeout, ink.
+ */
+export const SAVEABLE_ANNOTATION_TYPES: ReadonlySet<number> = new Set([1, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 15]);
+
 export interface DocumentAnnotationItem {
   annotation: { type: number; [key: string]: unknown };
 }
@@ -14,7 +23,7 @@ export function prepareDocumentAnnotations(items: unknown[]): DocumentAnnotation
     const annotation = (item as { annotation?: unknown }).annotation;
     if (!annotation || typeof annotation !== "object") return [];
     const value = annotation as { type?: unknown; [key: string]: unknown };
-    if (typeof value.type !== "number" || value.type === 13 || value.type === 17) return [];
+    if (typeof value.type !== "number" || !SAVEABLE_ANNOTATION_TYPES.has(value.type)) return [];
     return [{ annotation: value as DocumentAnnotationItem["annotation"] }];
   });
 }

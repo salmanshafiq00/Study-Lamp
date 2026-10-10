@@ -42,9 +42,14 @@ export async function startDriveConnect(idToken: string): Promise<void> {
 /** Short-lived (~1hr) access token for client-side use by the Google Picker
  *  only. Never stored beyond the Picker session. */
 export async function getDriveAccessToken(idToken: string, connectionId: string): Promise<string> {
+  return (await getDrivePickerAuth(idToken, connectionId)).accessToken;
+}
+
+/** Token plus the Google Cloud project number the Picker needs as its App ID (null when unknown). */
+export async function getDrivePickerAuth(idToken: string, connectionId: string): Promise<{ accessToken: string; appId: string | null }> {
   const res = await fetch(`/api/drive/access-token?connectionId=${encodeURIComponent(connectionId)}`, { headers: authHeaders(idToken) });
   const data = await parseOrThrow(res);
-  return data.accessToken;
+  return { accessToken: data.accessToken, appId: typeof data.appId === "string" ? data.appId : null };
 }
 
 /** Read-only Drive check for a Google Doc/Sheet; updates the stored modifiedTime when it changed. */

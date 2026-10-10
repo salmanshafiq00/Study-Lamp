@@ -9,6 +9,7 @@ import { toast } from "sonner";
 import { MAX_PDF_PREVIEW_BYTES, formatBytes, readResponseWithLimit } from "@/lib/documentViewerUtils";
 import { driveResponseErrorMessage } from "@/lib/driveErrors";
 import { pdfiumWasmUrl } from "@/lib/pdfAssets";
+import { prepareDocumentAnnotations } from "@/lib/documentAnnotations";
 import type { SaveStatus } from "@/lib/blobClient";
 
 const PDF_DOCUMENT_ID = "study-material-pdf";
@@ -349,9 +350,7 @@ export function PdfReader({
       if (annotationExportTimer.current) clearTimeout(annotationExportTimer.current);
       annotationExportTimer.current = setTimeout(() => {
         void annotations.exportAnnotations(undefined, PDF_DOCUMENT_ID).toPromise().then((items: Array<{ annotation: { type: number } }>) => {
-          const serializable = items
-            .filter((item) => item.annotation.type !== 13 && item.annotation.type !== 17)
-            .map((item) => ({ annotation: item.annotation }));
+          const serializable = prepareDocumentAnnotations(items);
           latestAnnotationChange.current?.(serializable);
         }).catch(() => {});
       }, 500);
