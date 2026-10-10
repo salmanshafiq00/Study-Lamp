@@ -1,5 +1,6 @@
 import crypto from "crypto";
 import { nativeExportMime } from "@/lib/driveMime";
+import { getGoogleClient } from "@/lib/server/googleClientConfig";
 import { DRIVE_ERROR_MESSAGES, classifyDriveExportError, extractGoogleErrorReason, type DriveErrorCode } from "@/lib/driveErrors";
 import {
   buildGoogleAuthUrl,
@@ -24,12 +25,10 @@ import {
  * connected Google account; it does not grant additional Drive access.
  *
  * Required env vars (server-only, never NEXT_PUBLIC_):
- *   GOOGLE_DRIVE_CLIENT_ID
- *   GOOGLE_DRIVE_CLIENT_SECRET
+ *   GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET  (shared client; legacy GOOGLE_DRIVE_CLIENT_ID /
+ *     GOOGLE_DRIVE_CLIENT_SECRET are still read, see googleClientConfig.ts)
  *   GOOGLE_DRIVE_OAUTH_STATE_SECRET  (generate with: openssl rand -base64 32)
- * Plus one public var so the browser can start the OAuth redirect and open
- * the Picker with the same client id:
- *   NEXT_PUBLIC_GOOGLE_DRIVE_CLIENT_ID
+ * Plus one public var so the browser can open the Picker:
  *   NEXT_PUBLIC_GOOGLE_PICKER_API_KEY  (a browser API key restricted to the
  *     Picker API — see https://console.cloud.google.com/apis/credentials)
  */
@@ -70,16 +69,14 @@ function env(name: string): string {
 }
 
 export function isDriveConfigured(): boolean {
-  return Boolean(
-    process.env.GOOGLE_DRIVE_CLIENT_ID &&
-    process.env.GOOGLE_DRIVE_CLIENT_SECRET &&
-    process.env.GOOGLE_DRIVE_OAUTH_STATE_SECRET
-  );
+  return Boolean(getGoogleClient("drive") && process.env.GOOGLE_DRIVE_OAUTH_STATE_SECRET);
 }
 
 /** The Drive OAuth client config, passed to the generic primitives. */
 function driveClient(): GoogleOAuthClient {
-  return { clientId: env("GOOGLE_DRIVE_CLIENT_ID"), clientSecret: env("GOOGLE_DRIVE_CLIENT_SECRET"), redirectPath: DRIVE_REDIRECT_PATH };
+  const credentials = getGoogleClient("drive");
+  if (!credentials) throw new Error("Google client id/secret are not configured (GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET).");
+  return { ...credentials, redirectPath: DRIVE_REDIRECT_PATH };
 }
 
 /** Builds the redirect_uri from the request's own origin rather than a

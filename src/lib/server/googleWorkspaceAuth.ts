@@ -1,4 +1,5 @@
 import crypto from "crypto";
+import { getGoogleClient } from "@/lib/server/googleClientConfig";
 import {
   buildGoogleAuthUrl,
   exchangeCode,
@@ -21,12 +22,11 @@ export const WORKSPACE_NONCE_COOKIE = "sl_google_nonce";
 /** The Workspace OAuth client, read from env. Throws a clear message when a
  *  variable is missing rather than silently sending an empty client_id. */
 function workspaceClient(): GoogleOAuthClient {
-  const clientId = process.env.GOOGLE_WORKSPACE_CLIENT_ID;
-  const clientSecret = process.env.GOOGLE_WORKSPACE_CLIENT_SECRET;
-  if (!clientId || !clientSecret) {
-    throw new Error("Google Workspace isn't configured (missing GOOGLE_WORKSPACE_CLIENT_ID/GOOGLE_WORKSPACE_CLIENT_SECRET).");
+  const credentials = getGoogleClient("workspace");
+  if (!credentials) {
+    throw new Error("Google Workspace isn't configured (missing GOOGLE_CLIENT_ID/GOOGLE_CLIENT_SECRET).");
   }
-  return { clientId, clientSecret, redirectPath: WORKSPACE_REDIRECT_PATH };
+  return { ...credentials, redirectPath: WORKSPACE_REDIRECT_PATH };
 }
 
 function stateSecret(): string {
@@ -36,11 +36,7 @@ function stateSecret(): string {
 }
 
 export function isWorkspaceConfigured(): boolean {
-  return Boolean(
-    process.env.GOOGLE_WORKSPACE_CLIENT_ID &&
-    process.env.GOOGLE_WORKSPACE_CLIENT_SECRET &&
-    process.env.GOOGLE_WORKSPACE_OAUTH_STATE_SECRET,
-  );
+  return Boolean(getGoogleClient("workspace") && process.env.GOOGLE_WORKSPACE_OAUTH_STATE_SECRET);
 }
 
 /** The auth URL for the requested features, with incremental consent so a

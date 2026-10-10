@@ -13,7 +13,7 @@ export const dynamic = "force-dynamic";
 export const POST = withAuthedRoute(async ({ uid, req }) => {
   if (!isDriveConfigured()) {
     return NextResponse.json(
-      { error: "Google Drive isn't configured on this deployment yet (missing GOOGLE_DRIVE_CLIENT_ID/SECRET)." },
+      { error: "Google Drive isn't configured on this deployment yet (missing GOOGLE_CLIENT_ID/SECRET and GOOGLE_DRIVE_OAUTH_STATE_SECRET)." },
       { status: 501 }
     );
   }

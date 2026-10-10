@@ -5,24 +5,26 @@ Lamp can later sync study goals to a dedicated Google Calendar and your Tasks.
 Nothing syncs in this step: it only connects the account safely, shows what was
 granted, and can disconnect.
 
-## 1. Create a second OAuth client
+## 1. Create ONE OAuth client (shared with Drive)
 
-In the existing Google Cloud project (the same one used for Drive):
+Study Lamp uses a single Google OAuth client for Drive, Calendar and Tasks. In the Google Cloud project that also owns the Picker API key:
 
 1. **APIs & Services → Credentials → Create credentials → OAuth client ID**.
 2. Application type: **Web application**.
-3. Name: `Study Lamp Workspace`.
+3. Name: `Study Lamp Google Client`.
 4. **Authorised redirect URIs** — add one per deployment, each ending in the
    callback path:
-   - `http://localhost:3000/api/google/auth/callback`
-   - your Vercel preview URL(s), e.g. `https://<preview>.vercel.app/api/google/auth/callback`
-   - your production URL, e.g. `https://your-domain.com/api/google/auth/callback`
+   - `http://localhost:3000/api/google/auth/callback` and `http://localhost:3000/api/drive/auth/callback`
+   - your production URL, e.g. `https://your-domain.com/api/google/auth/callback` and `https://your-domain.com/api/drive/auth/callback`
+   - (both callbacks are needed while the Drive and Workspace flows are separate; Vercel preview domains change, so test OAuth on localhost or production)
 5. Copy the **client ID** and **client secret**.
 
 ## 2. Enable the APIs
 
 **APIs & Services → Library**: enable both
 
+- **Google Drive API** and **Google Picker API**
+- **Google Docs API** and **Google Sheets API**
 - **Google Calendar API**
 - **Google Tasks API**
 
@@ -31,6 +33,7 @@ In the existing Google Cloud project (the same one used for Drive):
 **APIs & Services → OAuth consent screen**:
 
 1. Add these scopes (they are exactly what the app requests):
+   - `https://www.googleapis.com/auth/drive.file`
    - `https://www.googleapis.com/auth/calendar.app.created`
    - `https://www.googleapis.com/auth/tasks`
    - `https://www.googleapis.com/auth/userinfo.email`
@@ -49,14 +52,18 @@ Add these server-only variables (see `docs/deploy.md` for the full list):
 
 | Variable | Notes |
 | --- | --- |
-| `GOOGLE_WORKSPACE_CLIENT_ID` | From the "Study Lamp Workspace" OAuth client. |
-| `GOOGLE_WORKSPACE_CLIENT_SECRET` | Same client. |
+| `GOOGLE_CLIENT_ID` | From the shared OAuth client. Used by Drive AND Workspace. |
+| `GOOGLE_CLIENT_SECRET` | Same client. |
 | `GOOGLE_WORKSPACE_OAUTH_STATE_SECRET` | Generate with `openssl rand -base64 32`. Signs the OAuth `state`. |
+| `GOOGLE_DRIVE_OAUTH_STATE_SECRET` | A different random value. Signs the Drive OAuth `state`. |
 
-They are deliberately **separate** from the Drive client
-(`GOOGLE_DRIVE_*`) so the two flows use independent credentials and state
-secrets. The Workspace `state` HMAC is domain-separated with a `workspace.v1|`
-prefix, so a Drive state can never be replayed here (or vice versa).
+The legacy names (`GOOGLE_DRIVE_CLIENT_ID/SECRET`, `GOOGLE_WORKSPACE_CLIENT_ID/SECRET`)
+are still read when `GOOGLE_CLIENT_ID/SECRET` are not set, so existing deployments keep working.
+The two state secrets stay **separate**. The Workspace `state` HMAC is domain-separated with a
+`workspace.v1|` prefix, so a Drive state can never be replayed here (or vice versa).
+
+The Drive Picker needs `NEXT_PUBLIC_GOOGLE_PICKER_API_KEY` from the **same Cloud project** as the client
+(the Picker App ID is the project number inside the client id).
 
 ## 5. Scopes used
 

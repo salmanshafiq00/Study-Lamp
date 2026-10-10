@@ -23,18 +23,19 @@ Set these in Vercel (Production and Preview). `NEXT_PUBLIC_*` values are embedde
 | `NEXT_PUBLIC_SEED_ADMIN_EMAILS` | public | yes (keep in sync with `firestore.rules`) |
 | `NEXT_PUBLIC_HAS_YT_KEY` | public | optional |
 | `NEXT_PUBLIC_FACEBOOK_APP_ID` | public | optional (Facebook embeds) |
-| `NEXT_PUBLIC_GOOGLE_DRIVE_CLIENT_ID` | public | yes for Drive |
 | `NEXT_PUBLIC_GOOGLE_PICKER_API_KEY` | public | yes for Drive |
 | `FIREBASE_PROJECT_ID` | server | optional (falls back to the public project ID) |
 | `FIREBASE_CLIENT_EMAIL` | server | yes in production |
 | `FIREBASE_PRIVATE_KEY` | server | yes in production (keep `\n` escapes) |
 | `AI_CONNECTION_ENCRYPTION_KEY` | server | yes |
 | `AI_CONNECTION_ENCRYPTION_KEY_PREVIOUS` | server | only during key rotation |
-| `GOOGLE_DRIVE_CLIENT_ID` | server | yes for Drive |
-| `GOOGLE_DRIVE_CLIENT_SECRET` | server | yes for Drive |
+| `GOOGLE_CLIENT_ID` | server | recommended: one OAuth client for Drive, Calendar and Tasks |
+| `GOOGLE_CLIENT_SECRET` | server | recommended: same client |
+| `GOOGLE_DRIVE_CLIENT_ID` | server | legacy, only read when `GOOGLE_CLIENT_ID` is not set |
+| `GOOGLE_DRIVE_CLIENT_SECRET` | server | legacy, only read when `GOOGLE_CLIENT_SECRET` is not set |
 | `GOOGLE_DRIVE_OAUTH_STATE_SECRET` | server | yes for Drive |
-| `GOOGLE_WORKSPACE_CLIENT_ID` | server | yes for Calendar/Tasks |
-| `GOOGLE_WORKSPACE_CLIENT_SECRET` | server | yes for Calendar/Tasks |
+| `GOOGLE_WORKSPACE_CLIENT_ID` | server | legacy, only read when `GOOGLE_CLIENT_ID` is not set |
+| `GOOGLE_WORKSPACE_CLIENT_SECRET` | server | legacy, only read when `GOOGLE_CLIENT_SECRET` is not set |
 | `GOOGLE_WORKSPACE_OAUTH_STATE_SECRET` | server | yes for Calendar/Tasks |
 | `DRIVE_URL_SIGNING_SECRET` | server | yes for Drive playback |
 | `GOOGLE_SYNC_SIGNING_SECRET` | server | recommended for Calendar/Tasks/Docs/Sheets sync. Signs plan tokens. If unset, plan tokens fall back to `DRIVE_URL_SIGNING_SECRET` (see `docs/security.md` section 2b) |

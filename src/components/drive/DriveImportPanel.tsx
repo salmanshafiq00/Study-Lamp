@@ -185,7 +185,7 @@ export function DriveImportPanel({
             onPicked={handlePicked}
             label="Pick from Drive"
             allowFolders={allowFolders}
-            kinds={kinds ?? (allowFolders ? ["video"] : ["pdf", "docx", "pptx", "xlsx"])}
+            kinds={kinds ?? (allowFolders ? ["video"] : ["pdf", "gdoc", "gsheet", "docx", "xlsx"])}
           />
         )}
         <Button type="button" variant="outline" className="gap-1.5" disabled={busy} onClick={() => fileInputRef.current?.click()}>

@@ -3,6 +3,7 @@ import { getAccessTokenForConnection, DriveConnectionError } from "@/lib/server/
 import { logServerError } from "@/lib/server/logError";
 import { isValidDriveConnectionId } from "@/lib/server/googleDrive";
 import { withAuthedRoute } from "@/lib/server/routeHelpers";
+import { getGoogleClient, pickerAppIdFromClientId } from "@/lib/server/googleClientConfig";
 
 // Returns a short-lived (~1hr) Drive access token, scoped to drive.file, for
 // client-side use by the Google Picker only (Phase 14) — the Picker widget
@@ -22,7 +23,7 @@ export const GET = withAuthedRoute(async ({ uid, req }) => {
     // The Picker's App ID must be the Google Cloud project NUMBER that owns the OAuth client that minted
     // this token. That number is the digits before the first "-" in the client id, so derive it here
     // instead of relying on the Firebase sender id (which differs when the OAuth client lives in another project).
-    const appId = /^(\d{6,})-/.exec(process.env.GOOGLE_DRIVE_CLIENT_ID ?? "")?.[1] ?? null;
+    const appId = pickerAppIdFromClientId(getGoogleClient("drive")?.clientId);
     return NextResponse.json({ accessToken, appId });
   } catch (err) {
     if (err instanceof DriveConnectionError) {

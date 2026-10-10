@@ -6,7 +6,7 @@ import { getDrivePickerAuth } from "@/lib/driveClient";
 import { Button } from "@/components/ui/button";
 import { FolderOpen } from "lucide-react";
 import { toast } from "sonner";
-import { buildPickerMimeTypes, type DrivePickerKind } from "@/lib/driveMime";
+import { buildPickerMimeTypes, buildPickerViewSpecs, type DrivePickerKind } from "@/lib/driveMime";
 
 declare global {
   interface Window {
@@ -102,44 +102,25 @@ export function DrivePickerButton({
       logPickerAppId(appId, overrideAppId ? "env override" : auth.appId ? "Drive OAuth client" : "Firebase sender id");
 
       const google = window.google;
-      const views: any[] = [];
-      const videoMimeTypes = kinds.includes("video") ? ["video/*"] : [];
-      const docMimeTypes = buildPickerMimeTypes(kinds.filter((kind) => kind !== "video"));
-
-      if (videoMimeTypes.length > 0) {
-        views.push(
-          new google.picker.DocsView(google.picker.ViewId.DOCS_VIDEOS)
-            .setMimeTypes(videoMimeTypes.join(","))
-            .setIncludeFolders(allowFolders)
-            .setSelectFolderEnabled(allowFolders)
-        );
-      }
-
-      if (docMimeTypes.length > 0) {
-        views.push(
-          new google.picker.DocsView(google.picker.ViewId.DOCS)
-            .setMimeTypes(docMimeTypes.join(","))
-            .setIncludeFolders(allowFolders)
-            .setSelectFolderEnabled(allowFolders)
-        );
-      }
-
-      if (views.length === 0) {
-        views.push(
-          new google.picker.DocsView(google.picker.ViewId.DOCS)
-            .setIncludeFolders(allowFolders)
-            .setSelectFolderEnabled(allowFolders)
-        );
-      }
+      const hasVideo = kinds.includes("video");
+      const hasDocs = kinds.some((kind) => kind !== "video");
+      // One view (= one tab) per file type: Videos, PDFs, Google Docs, Google Sheets, Google Drive.
+      const views = buildPickerViewSpecs(kinds).map((spec) => {
+        const view = new google.picker.DocsView(google.picker.ViewId[spec.viewId])
+          .setIncludeFolders(allowFolders)
+          .setSelectFolderEnabled(allowFolders);
+        if (spec.mimeTypes && spec.mimeTypes.length > 0) view.setMimeTypes(spec.mimeTypes.join(","));
+        return view;
+      });
 
       const builder = new google.picker.PickerBuilder()
         .setAppId(appId)
         .setOAuthToken(accessToken)
         .setDeveloperKey(apiKey)
         .setTitle(
-          kinds.includes("video") && docMimeTypes.length > 0
+          hasVideo && hasDocs
             ? "Choose a video, document, or folder"
-            : kinds.includes("video")
+            : hasVideo
               ? "Choose a video or folder"
               : "Choose a document or folder"
         )
