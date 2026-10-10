@@ -2,11 +2,11 @@
 
 import * as React from "react";
 import Link from "next/link";
-import { usePathname, useSearchParams } from "next/navigation";
+import { usePathname } from "next/navigation";
 import {
   LayoutDashboard, ListVideo, Clock, Star, Flag, PlayCircle, BookOpenCheck, Share2,
   ShieldCheck, Users, FolderKanban, Tags, Target, Compass, X, Settings, ChevronDown, Sparkles,
-  HardDrive, FileText, FileSpreadsheet, DatabaseBackup, CalendarRange, Database,
+  HardDrive, FileText, DatabaseBackup, CalendarRange, Database,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/components/auth/AuthProvider";
@@ -15,6 +15,7 @@ const studentNav = [
   { href: "/dashboard", label: "Home", icon: LayoutDashboard, tour: "nav-home" },
   { href: "/playlists", label: "Playlists", icon: ListVideo, tour: "nav-playlists" },
   { href: "/library", label: "Library", icon: ListVideo, tour: "nav-library" },
+  { href: "/study-materials", label: "Study Materials", icon: FileText },
   { href: "/shared", label: "Shared", icon: Share2 },
   { href: "/continue-learning", label: "Continue Learning", icon: PlayCircle, tour: "nav-continue" },
   { href: "/watch-later", label: "Watch Later", icon: Clock },
@@ -49,24 +50,12 @@ const adminNav = [
 
 export function Sidebar({ mobileOpen, onClose }: { mobileOpen?: boolean; onClose?: () => void }) {
   const pathname = usePathname();
-  const searchParams = useSearchParams();
   const { isAdmin } = useAuth();
   const settingsActive = pathname === "/settings" || pathname.startsWith("/settings/");
   const [settingsOpen, setSettingsOpen] = React.useState(settingsActive);
-  const studyMaterialsActive = pathname === "/study-materials";
-  const requestedStudyType = searchParams.get("type");
-  const studyType = requestedStudyType === "pdf" || requestedStudyType === "docx" || requestedStudyType === "xlsx"
-    ? requestedStudyType
-    : "all";
-  const [studyMaterialsOpen, setStudyMaterialsOpen] = React.useState(studyMaterialsActive);
-
   React.useEffect(() => {
     if (settingsActive) setSettingsOpen(true);
   }, [settingsActive]);
-
-  React.useEffect(() => {
-    if (studyMaterialsActive) setStudyMaterialsOpen(true);
-  }, [studyMaterialsActive]);
 
   const content = (
     <div className="flex h-full flex-col gap-6 overflow-y-auto px-3 py-5">
@@ -76,33 +65,13 @@ export function Sidebar({ mobileOpen, onClose }: { mobileOpen?: boolean; onClose
       </Link>
 
       <nav className="flex flex-col gap-1">
-        {studentNav.slice(0, 3).map((item) => (
-          <SidebarLink key={item.href} {...item} active={pathname === item.href} onClick={onClose} />
-        ))}
-        <button
-          type="button"
-          onClick={() => setStudyMaterialsOpen((open) => !open)}
-          className={cn(
-            "flex w-full items-center gap-2.5 rounded-md px-2.5 py-2 text-sm font-medium transition-colors",
-            studyMaterialsActive ? "bg-primary text-primary-foreground" : "text-foreground/80 hover:bg-secondary"
-          )}
-          aria-expanded={studyMaterialsOpen}
-          aria-controls="study-materials-navigation"
-        >
-          <FileText className="h-4 w-4 shrink-0" />
-          <span className="flex-1 text-left">Study Materials</span>
-          <ChevronDown className={cn("h-4 w-4 transition-transform", studyMaterialsOpen && "rotate-180")} />
-        </button>
-        {studyMaterialsOpen && (
-          <div id="study-materials-navigation" className="ml-4 flex flex-col gap-1 border-l border-border pl-2">
-            <SidebarLink href="/study-materials?type=all" label="All materials" icon={FileText} active={studyMaterialsActive && studyType === "all"} onClick={onClose} />
-            <SidebarLink href="/study-materials?type=pdf" label="PDF" icon={FileText} active={studyMaterialsActive && studyType === "pdf"} onClick={onClose} />
-            <SidebarLink href="/study-materials?type=docx" label="Word" icon={FileText} active={studyMaterialsActive && studyType === "docx"} onClick={onClose} />
-            <SidebarLink href="/study-materials?type=xlsx" label="Excel" icon={FileSpreadsheet} active={studyMaterialsActive && studyType === "xlsx"} onClick={onClose} />
-          </div>
-        )}
-        {studentNav.slice(3).map((item) => (
-          <SidebarLink key={item.href} {...item} active={pathname === item.href} onClick={onClose} />
+        {studentNav.map((item) => (
+          <SidebarLink
+            key={item.href}
+            {...item}
+            active={pathname === item.href || (item.href === "/study-materials" && pathname.startsWith("/study-materials/"))}
+            onClick={onClose}
+          />
         ))}
       </nav>
 
