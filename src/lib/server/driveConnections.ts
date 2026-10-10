@@ -2,6 +2,7 @@ import admin from "firebase-admin";
 import { adminDb } from "@/lib/server/firebase-admin";
 import { encryptApiKey, decryptApiKey } from "@/lib/server/aiEncryption";
 import { refreshAccessToken, revokeToken } from "@/lib/server/googleDrive";
+import { isGoogleAuthInvalid } from "@/lib/server/googleOAuth";
 import { DriveTokenCache } from "@/lib/server/driveTokenCache";
 import { runWithDriveToken } from "@/lib/server/driveRequest";
 import type { DriveConnection, DriveConnectionSummary } from "@/types";
@@ -163,8 +164,8 @@ export async function getAccessTokenForConnection(
         }
       }
       return { token: accessToken, expiresAt: now + Math.max(0, expiresIn) * 1000 };
-    } catch (error: any) {
-      if (error?.driveAuthInvalid) {
+    } catch (error: unknown) {
+      if (isGoogleAuthInvalid(error)) {
         invalidateAccessToken(uid, connectionId);
         await ref.update({ status: "invalid" });
         throw new DriveConnectionError("invalid", "This Google Drive connection needs to be reconnected in Settings → Google Drive.");

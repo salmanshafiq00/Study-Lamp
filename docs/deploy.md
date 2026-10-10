@@ -45,6 +45,20 @@ Set these in Vercel (Production and Preview). `NEXT_PUBLIC_*` values are embedde
 | `DRIVE_TIMING` | server | optional (`1` logs Drive timings) |
 | `CSP_MODE` | build-time | optional (`enforce` sends an enforcing CSP) |
 
+## Google OAuth redirect URIs
+
+One OAuth client ("Study Lamp Google Client") serves Drive, Calendar and Tasks. Its **Authorised redirect URIs**
+must contain exactly these paths for each origin you use (localhost and production; Vercel preview domains
+cannot be listed):
+
+- `/api/drive/auth/callback`
+- `/api/google/auth/callback`
+
+For example `http://localhost:3000/api/drive/auth/callback`, `https://studylamp.vercel.app/api/drive/auth/callback`,
+`http://localhost:3000/api/google/auth/callback` and `https://studylamp.vercel.app/api/google/auth/callback`.
+`src/lib/docsRedirectUris.test.ts` fails if a callback route exists in the code but is missing from this list.
+See `docs/google-workspace.md` for the full client setup.
+
 ## Function duration (`maxDuration`)
 
 Heavy routes declare `export const maxDuration = 60;`:
@@ -99,5 +113,5 @@ Type errors such as "Cannot find module 'xlsx'" and "Parameter 'name' implicitly
 ## Google APIs to enable (Calendar, Tasks, Docs, Sheets)
 
 In the Google Cloud project: **APIs & Services -> Library** and enable **Google Calendar API**, **Google Tasks API**,
-**Google Docs API** and **Google Sheets API** (plus Drive API for Drive). Calendar and Tasks use the Workspace OAuth
+**Google Docs API** and **Google Sheets API** (plus Drive API for Drive). Calendar, Tasks and Drive all use the same OAuth
 client; Docs and Sheets write-back uses the Drive connection (`drive.file`). See `docs/google-workspace.md`.

@@ -1,23 +1,38 @@
-# Google Workspace (Calendar + Tasks) — Cloud setup
+# Google (Drive + Calendar + Tasks) — Cloud setup
 
-Step W2 connects a Google account with the narrowest possible scopes so Study
-Lamp can later sync study goals to a dedicated Google Calendar and your Tasks.
-Nothing syncs in this step: it only connects the account safely, shows what was
-granted, and can disconnect.
+Study Lamp connects a Google account with the narrowest possible scopes: Drive
+(only files you pick or Study Lamp creates), a dedicated Google Calendar, and
+your Tasks. Everything is managed on one page, **Settings → Google**, with one
+card per service. Nothing is written to your Google content until you preview and
+confirm it.
 
-## 1. Create ONE OAuth client (shared with Drive)
+## 1. Create the OAuth client
 
-Study Lamp uses a single Google OAuth client for Drive, Calendar and Tasks. In the Google Cloud project that also owns the Picker API key:
+Study Lamp uses **one** Google OAuth client for Drive, Calendar and Tasks. Create it in the
+**same Google Cloud project** that owns the Picker API key (the Picker App ID is the project
+number inside the client id; a key from another project makes the Picker show nothing).
 
 1. **APIs & Services → Credentials → Create credentials → OAuth client ID**.
 2. Application type: **Web application**.
-3. Name: `Study Lamp Google Client`.
-4. **Authorised redirect URIs** — add one per deployment, each ending in the
-   callback path:
-   - `http://localhost:3000/api/google/auth/callback` and `http://localhost:3000/api/drive/auth/callback`
-   - your production URL, e.g. `https://your-domain.com/api/google/auth/callback` and `https://your-domain.com/api/drive/auth/callback`
-   - (both callbacks are needed while the Drive and Workspace flows are separate; Vercel preview domains change, so test OAuth on localhost or production)
-5. Copy the **client ID** and **client secret**.
+3. Name: `Study Lamp Google Client` (rename an older client such as "Google Workspace Client" if you reuse it).
+4. **Authorised JavaScript origins** (exact, no trailing slash):
+   - `http://localhost:3000`
+   - `https://studylamp.vercel.app` (your production origin)
+5. **Authorised redirect URIs**. Google compares them character by character, so scheme, host, port,
+   path and trailing slash must match. Add all four while the Drive and Google flows still have
+   separate callback routes:
+
+   | URI | Used by |
+   | --- | --- |
+   | `http://localhost:3000/api/drive/auth/callback` | Drive, local |
+   | `https://studylamp.vercel.app/api/drive/auth/callback` | Drive, production |
+   | `http://localhost:3000/api/google/auth/callback` | Calendar and Tasks, local |
+   | `https://studylamp.vercel.app/api/google/auth/callback` | Calendar and Tasks, production |
+
+   Replace `studylamp.vercel.app` with your own domain. Vercel preview domains change on every
+   deploy and cannot be listed, so test OAuth on localhost or production only.
+   `NEXT_PUBLIC_APP_URL` must equal your production origin.
+6. Copy the **client ID** and **client secret**.
 
 ## 2. Enable the APIs
 
@@ -43,7 +58,7 @@ Study Lamp uses a single Google OAuth client for Drive, Calendar and Tasks. In t
 
 While the consent screen is in **Testing** status, Google expires refresh tokens
 after **7 days**. Users will see a "Needs reconnect" badge in
-**Settings → Google Workspace** and can fix it with the **Reconnect** button.
+**Settings → Google** and can fix it with the **Reconnect** button.
 Publish the app (or keep re-testing within 7 days) for tokens that last.
 
 ## 4. Environment variables
@@ -59,16 +74,39 @@ Add these server-only variables (see `docs/deploy.md` for the full list):
 
 The legacy names (`GOOGLE_DRIVE_CLIENT_ID/SECRET`, `GOOGLE_WORKSPACE_CLIENT_ID/SECRET`)
 are still read when `GOOGLE_CLIENT_ID/SECRET` are not set, so existing deployments keep working.
-The two state secrets stay **separate**. The Workspace `state` HMAC is domain-separated with a
-`workspace.v1|` prefix, so a Drive state can never be replayed here (or vice versa).
+The two state secrets stay **separate** and must never hold the same value. Only the Workspace
+`state` HMAC is domain-separated (a `workspace.v1|` prefix); the Drive `state` has no prefix. Keeping
+the two secrets different is what stops a state signed for one flow from verifying in the other.
 
 The Drive Picker needs `NEXT_PUBLIC_GOOGLE_PICKER_API_KEY` from the **same Cloud project** as the client
 (the Picker App ID is the project number inside the client id).
+
+Restrict that key (Credentials → the key): **Application restrictions = HTTP referrers**
+(`localhost:3000/*` and your production domain `/*`), **API restrictions = Google Picker API**
+(add Drive API only if Google asks for it).
+
+### Picker tabs
+
+The Picker shows one tab per file type, named by Google, not by Study Lamp
+(`buildPickerViewSpecs` in `src/lib/driveMime.ts`):
+
+| Tab | Shows |
+| --- | --- |
+| Videos | video files |
+| PDFs | PDF files |
+| Google Docs | Google Docs |
+| Google Sheets | Google Sheets |
+| Google Drive | Word and Excel files (one combined tab) |
+
+Which tabs appear depends on the dialog: the video dialog shows only Videos, the study-material
+dialogs show the document tabs. With the narrow `drive.file` scope the Picker can list files, but
+Study Lamp only gets access to the files you select. Do not widen the scope to change that.
 
 ## 5. Scopes used
 
 | Feature | Scope | Why it is safe |
 | --- | --- | --- |
+| Drive | `drive.file` | Study Lamp can only open files you pick in the Picker or files it creates itself (including its own "Study Lamp data" folder). It cannot browse the rest of your Drive. |
 | Calendar | `calendar.app.created` | Study Lamp can only see and edit calendars it created itself — never your existing calendars. |
 | Tasks | `tasks` | **Wider than Calendar.** Google has no "only what the app created" scope for Tasks, so this permission lets the app read and change **all** of your task lists. Study Lamp's code only ever touches its own "Study Lamp" list (it never lists or opens your other lists; a test enforces this), and it writes only after you confirm. |
 | Account | `userinfo.email` | Only to show which Google account is connected. |
@@ -79,16 +117,16 @@ The Drive Picker needs `NEXT_PUBLIC_GOOGLE_PICKER_API_KEY` from the **same Cloud
 > `calendar.app.created` really is limited to calendars Study Lamp created.
 > If you are not comfortable with this, allow only Calendar.
 
-Study Lamp requests one feature at a time ("Allow Calendar access" / "Allow
+Study Lamp requests one feature at a time (Drive, "Allow Calendar access", "Allow
 Tasks access"), using incremental consent (`include_granted_scopes=true`) so
 granting Tasks later never drops an existing Calendar grant.
 
 ## 6. Verify
 
-1. **Settings → Google Workspace → Allow Calendar access** → consent → you land
+1. **Settings → Google → Calendar card → Allow Calendar access** → consent → you land
    back with a "Connected …" toast and the account shows **Calendar allowed**,
    **Tasks not allowed**.
-2. **Allow Tasks access** → both show **allowed**.
+2. **Tasks card → Allow Tasks access** → both show **allowed**.
 3. Untick a permission on Google's screen → the app reports which one is missing.
 4. **Disconnect** → the stored token is removed and revoked at Google; anything
    already created in Google is untouched.
@@ -104,7 +142,7 @@ denied to the client SDK in `firestore.rules`; all access goes through
 
 ## Using Calendar sync
 
-Calendar sync is **off** until you turn it on in *Settings → Google Workspace → Sync goals with Calendar*.
+Calendar sync is **off** until you turn it on in *Settings → Google → Calendar card → Sync goals with Calendar*.
 Turning it on creates one calendar, "Study Lamp goals", in your Google account. It never searches for, reads or
 changes your other calendars, and it writes **no events** until you approve changes.
 
@@ -127,7 +165,7 @@ guessed into a date.
 
 A goal that you "stop syncing" after its event was deleted is skipped until its event exists in Google again.
 
-## 7. Before enabling sync for real users: run the Google diagnostic
+## 8. Before enabling sync for real users: run the Google diagnostic
 
 Two behaviours cannot be checked without calling Google: whether Google Tasks honours `If-Match` on `tasks.patch`, and
 whether `calendars.insert`, `events.patch` (with `If-Match`) and `calendars.get` work under `calendar.app.created`.
@@ -149,10 +187,10 @@ GOOGLE_ACCESS_TOKEN=<short-lived access token> node scripts/googleDiagnostic.mjs
 ## Reconcile, history and removal
 
 **Orphans.** If you delete a goal, its event or task is left in Google (deletions are never synced). The status
-response lists up to 50 such leftovers (by the goal's last-known title), and *Settings -> Google Workspace -> Clean up
+response lists up to 50 such leftovers (by the goal's last-known title), and *Settings -> Google -> Clean up
 Google -> Review* shows them. Looking is read-only.
 
-**Recent changes.** *Settings -> Google Workspace -> Recent changes* shows the newest changes Study Lamp applied, in
+**Recent changes.** *Settings -> Google -> Recent changes* shows the newest changes Study Lamp applied, in
 either direction (50 at a time, "Show older changes" for more). It is a record only: there is no undo button. It holds
 goal-level fields only (title, date, completed), never tokens or document text. The log keeps about 200 entries.
 
@@ -191,7 +229,10 @@ All of these are server-only in `firestore.rules`.
 
 | Symptom | Cause and fix |
 | --- | --- |
-| "Needs reconnect" / `invalid_grant` | Refresh token revoked or expired. Use **Reconnect**. In *Testing* consent-screen status tokens last 7 days. |
+| `redirect_uri_mismatch` | The redirect URI Study Lamp sent is not in the client's list. It must match exactly: `http` vs `https`, `localhost:3000` vs another port, a trailing slash, and the path (`/api/drive/auth/callback` for Drive, `/api/google/auth/callback` for Calendar and Tasks). Check `NEXT_PUBLIC_APP_URL`. Preview deployments cannot work. |
+| Picker opens empty or does not open | The `NEXT_PUBLIC_GOOGLE_PICKER_API_KEY` referrer list does not include the current origin, the key is not allowed to call the Picker API, or the key and the OAuth client are in different Cloud projects (wrong project number). Fix the key, then reload. |
+| "Needs reconnect" / `invalid_grant` | Refresh token revoked or expired. Use **Reconnect** on that card. |
+| Reconnect needed about once a week | The consent screen is in *Testing* status: Google expires refresh tokens after 7 days. Publish the app, or reconnect within 7 days. |
 | Rate-limit messages | Study Lamp limits checks (30/min) and applies (20/min) per user, and Google may answer 429. Wait a minute; requests retry automatically. |
 | "The Study Lamp calendar / task list was deleted in Google" | Turn the sync on again to create a new one. Nothing is re-created silently. |
 | "Changed since preview" | The goal or the Google item changed after you opened the review. Nothing was written for that item; check again. |

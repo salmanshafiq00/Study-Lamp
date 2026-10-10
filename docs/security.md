@@ -2,6 +2,24 @@
 
 Keep secrets out of source control, logs, screenshots and shell history. Prefer `--env-file` or your host's secret manager over inline literals.
 
+## 0. Google scopes and secret files
+
+Study Lamp asks Google for exactly four scopes and never widens them:
+
+| Scope | Why it is narrow |
+|---|---|
+| `https://www.googleapis.com/auth/drive.file` | Only files you pick in the Picker or that Study Lamp creates (including its "Study Lamp data" folder). Not `drive`, `drive.readonly` or `drive.appdata`. |
+| `https://www.googleapis.com/auth/calendar.app.created` | Only calendars Study Lamp created itself. Your other calendars are invisible to it. |
+| `https://www.googleapis.com/auth/tasks` | **The one wide scope.** Google has no "only what the app created" scope for Tasks, so this grants access to **all** of your task lists. The code limits itself: it only opens its own "Study Lamp" list, never lists or reads your others (a test enforces this), and writes only after you preview and confirm. |
+| `https://www.googleapis.com/auth/userinfo.email` | Only to show which Google account is connected. |
+
+If you are not comfortable with the Tasks scope, connect Drive and Calendar only.
+
+**`.env.local` must never be zipped, shared or committed.** It holds the Firebase Admin key, the encryption
+key and every signing and OAuth secret. When you send the project to someone, exclude `.env.local` and
+`node_modules` (for example `zip -r src.zip . -x ".env*" "node_modules/*" ".next/*"`, then add `.env.example` back if wanted).
+If a zip with `.env.local` was shared anywhere, treat it as leaked and follow section 7.
+
 ## 1. Rotate `AI_CONNECTION_ENCRYPTION_KEY`
 
 `AI_CONNECTION_ENCRYPTION_KEY` encrypts user/system AI API keys and Google Drive + Google Workspace refresh tokens. Do not replace it without keeping the old key until every stored credential has been re-encrypted.
@@ -42,8 +60,7 @@ Every Google write (Calendar, Tasks, Docs, Sheets) goes through preview -> confi
 | `GOOGLE_DRIVE_OAUTH_STATE_SECRET` | Generate a new random value, redeploy. Only Drive connect flows in progress (10 min window) fail; users just retry. |
 | `GOOGLE_WORKSPACE_OAUTH_STATE_SECRET` | Same as above, for the Google Workspace (Calendar/Tasks) connect flow. In-flight connects (10 min) fail; users retry. |
 | Firebase Admin key (`FIREBASE_PRIVATE_KEY`, `FIREBASE_CLIENT_EMAIL`) | Google Cloud Console → IAM → Service accounts → create a new key → update the env vars → redeploy → confirm API routes work → **delete the old key**. |
-| Google OAuth client secret (`GOOGLE_DRIVE_CLIENT_SECRET`) | Cloud Console → Credentials → OAuth client → add a new secret → update env → redeploy → disable the old secret. Existing refresh tokens keep working. |
-| Google Workspace OAuth client secret (`GOOGLE_WORKSPACE_CLIENT_SECRET`) | Same as above, on the "Study Lamp Workspace" OAuth client. Existing refresh tokens keep working. |
+| Google OAuth client secret (`GOOGLE_CLIENT_SECRET`) | The one "Study Lamp Google Client" serves Drive, Calendar and Tasks. Cloud Console → Credentials → OAuth client → add a new secret → update env → redeploy → disable the old secret. Existing refresh tokens keep working. If you still use the legacy names (`GOOGLE_DRIVE_CLIENT_SECRET`, `GOOGLE_WORKSPACE_CLIENT_SECRET`), update every one that holds the old value. |
 | Facebook app secret | The current code does not read `FACEBOOK_APP_SECRET`. If it is in your env files, remove it. If you ever use it, reset it in Meta for Developers → App settings → Basic. |
 | `FACEBOOK_PAGE_ACCESS_TOKEN` | Generate a new Page token in Meta for Developers, update env, redeploy, revoke the old token. |
 | `YOUTUBE_API_KEY` (server) | Create a new key, restrict it to **YouTube Data API v3**, update env, redeploy, delete the old key. |

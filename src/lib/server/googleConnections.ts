@@ -4,6 +4,7 @@ import { encryptApiKey, decryptApiKey } from "@/lib/server/aiEncryption";
 import { CalendarDeletedError, createCalendarClient, ensureStudyLampCalendar } from "@/lib/server/googleCalendar";
 import { createTasksClient, ensureStudyLampTaskList, TasksListDeletedError, type TasksWriteClient } from "@/lib/server/googleTasks";
 import { refreshWorkspaceAccessToken, revokeWorkspaceToken } from "@/lib/server/googleWorkspaceAuth";
+import { isGoogleAuthInvalid } from "@/lib/server/googleOAuth";
 import { DriveTokenCache } from "@/lib/server/driveTokenCache";
 import { runWithDriveToken } from "@/lib/server/driveRequest";
 import { type GoogleWorkspaceFeature } from "@/lib/server/googleScopes";
@@ -223,8 +224,8 @@ export async function resolveGoogleAccessToken(
   try {
     const { accessToken, expiresIn } = await refresh(refreshToken);
     return { token: accessToken, expiresAt: now + Math.max(0, expiresIn) * 1000 };
-  } catch (error: any) {
-    if (error?.googleAuthInvalid || error?.driveAuthInvalid) {
+  } catch (error: unknown) {
+    if (isGoogleAuthInvalid(error)) {
       throw new GoogleConnectionError("invalid", "This Google connection needs to be reconnected.");
     }
     throw new GoogleConnectionError("network", "Couldn't reach Google. Please try again shortly.");

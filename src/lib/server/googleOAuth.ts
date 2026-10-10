@@ -1,4 +1,4 @@
-﻿// Step W2: generic Google OAuth2 primitives, shared by the Drive flow
+// Step W2: generic Google OAuth2 primitives, shared by the Drive flow
 // (src/lib/server/googleDrive.ts) and the Workspace flow
 // (src/lib/server/googleWorkspaceAuth.ts and the /api/google/* routes).
 //
@@ -17,6 +17,32 @@ export interface GoogleOAuthClient {
   clientSecret: string;
   /** Path only, e.g. "/api/google/auth/callback". The origin is supplied per call. */
   redirectPath: string;
+}
+
+/** Error thrown by the OAuth primitives. `googleAuthInvalid` is true when
+ *  Google answered 400/401 to a refresh (token revoked or expired).
+ *  `driveAuthInvalid` is a legacy alias read by the Drive helpers; both
+ *  always carry the same value. */
+export class GoogleOAuthError extends Error {
+  readonly status: number;
+  readonly googleAuthInvalid: boolean;
+  readonly driveAuthInvalid: boolean;
+
+  constructor(message: string, status: number) {
+    super(message);
+    this.name = "GoogleOAuthError";
+    this.status = status;
+    this.googleAuthInvalid = status === 400 || status === 401;
+    this.driveAuthInvalid = this.googleAuthInvalid;
+  }
+}
+
+/** True when `error` says the stored refresh token is no longer valid.
+ *  Accepts both flag names so old and new callers keep working. */
+export function isGoogleAuthInvalid(error: unknown): boolean {
+  if (typeof error !== "object" || error === null) return false;
+  const flags = error as { googleAuthInvalid?: unknown; driveAuthInvalid?: unknown };
+  return flags.googleAuthInvalid === true || flags.driveAuthInvalid === true;
 }
 
 export interface GoogleTokenResponse {
@@ -80,9 +106,9 @@ export async function exchangeCode(
   return (await response.json()) as GoogleTokenResponse;
 }
 
-/** Refreshes a stored refresh token. Marks the thrown error with
- *  `googleAuthInvalid` on 400/401 so callers can flag the connection invalid
- *  (the refresh token was revoked or expired). */
+/** Refreshes a stored refresh token. Throws a GoogleOAuthError whose
+ *  `googleAuthInvalid` (and legacy `driveAuthInvalid`) flag is true on 400/401,
+ *  so callers can flag the connection invalid (token revoked or expired). */
 export async function refreshToken(
   refreshTokenValue: string,
   client: GoogleOAuthClient,
@@ -98,13 +124,7 @@ export async function refreshToken(
     }),
   });
   if (!response.ok) {
-    const err: any = new Error(`Google token refresh failed (${response.status}).`);
-    // Two flag names are set so both existing consumers keep working
-    // unchanged: Drive reads `driveAuthInvalid`, Workspace reads
-    // `googleAuthInvalid`. Both mean "the refresh token is no longer valid".
-    err.googleAuthInvalid = response.status === 400 || response.status === 401;
-    err.driveAuthInvalid = err.googleAuthInvalid;
-    throw err;
+    throw new GoogleOAuthError(`Google token refresh failed (${response.status}).`, response.status);
   }
   const data = (await response.json()) as GoogleTokenResponse;
   return { accessToken: data.access_token, expiresIn: data.expires_in };
