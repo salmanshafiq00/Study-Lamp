@@ -106,9 +106,35 @@ Requirements:
 - JSON must valid and parseable.`;
 }
 
-export function buildRoadmapStepsPrompt(input: { categoryName: string; level: RoadmapLevel; subtopics: string[] }): string {
-  const { categoryName, level, subtopics } = input;
+export interface RoadmapPromptReference {
+  title: string;
+  sourceUrl: string;
+  concepts: string[];
+}
+
+export function buildRoadmapStepsPrompt(input: {
+  categoryName: string;
+  level: RoadmapLevel;
+  subtopics: string[];
+  reference?: RoadmapPromptReference;
+}): string {
+  const { categoryName, level, subtopics, reference } = input;
   const focus = subtopics.length > 0 ? subtopics.join(", ") : "all core sub-skills of this topic";
+
+  const referenceBlock = reference
+    ? [
+        "",
+        `Reference curriculum (from roadmap.sh's "${reference.title}" roadmap — ${reference.sourceUrl}):`,
+        ...reference.concepts.map((concept, index) => `${index + 1}. ${concept}`),
+        "",
+        "Use this reference curriculum as the backbone of the plan:",
+        "- Preserve its terminology and progression where it fits the learner's level.",
+        "- Cover the foundational concepts before advanced ones; you may group several small concepts into one week.",
+        "- Do not invent major topics that are absent from the reference unless a gap is essential for a coherent plan.",
+        "- Ignore reference items that belong to another level; keep the plan scoped to the requested level.",
+      ].join("\n")
+    : "";
+
   return `You are an expert curriculum designer creating a week-by-week study plan.
  
 Topic: "${categoryName}"
@@ -116,7 +142,7 @@ Learner level: ${level}
 Specific focus areas requested by the learner: ${focus}
  
 Design a ${level}-level roadmap broken into WEEKS, not vague topic names. Use current, widely-accepted best practice for teaching this subject.
- 
+${referenceBlock}
 Rules:
 - Return between 4 and 10 weeks for THIS level only — do not include other levels.
 - Each week builds on the previous one and stays within scope for a "${level}" learner.
@@ -181,7 +207,7 @@ export function parseRoadmapStepsFromText(raw: string): RoadmapStep[] {
 
 export async function generateRoadmapStepsForLevel(
   connection: AiConnectionCredentials,
-  input: { categoryName: string; level: RoadmapLevel; subtopics: string[] }
+  input: { categoryName: string; level: RoadmapLevel; subtopics: string[]; reference?: RoadmapPromptReference }
 ): Promise<RoadmapStep[]> {
   const prompt = buildRoadmapStepsPrompt(input);
   const raw = await generateAiText(connection, prompt, AI_OPTIONS.roadmapSteps);

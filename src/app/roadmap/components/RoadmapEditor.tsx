@@ -1,8 +1,6 @@
 "use client";
 
 import * as React from "react";
-import Image from "next/image";
-import Link from "next/link";
 import { AiLanguagePicker } from "@/components/ai/AiLanguagePicker";
 import { useAiLanguage } from "@/hooks/useAiLanguage";
 import { useAuth } from "@/components/auth/AuthProvider";
@@ -13,13 +11,13 @@ import { SortableList } from "@/components/dnd/SortableList";
 import { addGoal } from "@/lib/firestore/goals";
 import { offerCalendarReview, offerTasksReview } from "@/lib/calendarGoalHook";
 import { useRouter } from "next/navigation";
-import { buildPlaylistSearchQuery, goalDraftTargetDate, parseImportedRoadmapText } from "@/lib/roadmapUtils";
-import { searchPlaylistsForStep, type YouTubePlaylistSearchResult } from "@/lib/roadmapPlaylistClient";
+import { goalDraftTargetDate, parseImportedRoadmapText } from "@/lib/roadmapUtils";
 import { suggestGoalsFromRoadmap, type GoalSuggestion } from "@/lib/goalSuggestionsClient";
 import type { Category, LearningRoadmap, RoadmapLevel, RoadmapStep } from "@/types";
-import { GripVertical, Plus, Trash2, Youtube, Target, Import } from "lucide-react";
+import { GripVertical, Plus, Trash2, Target, Import } from "lucide-react";
 import { toast } from "sonner";
 import { GoalSuggestionsList } from "./GoalSuggestionsList";
+import { StepPlaylistSuggestions } from "./StepPlaylistSuggestions";
 
 // ── Editable steps + per-step playlist suggestions + goal suggestions. ──
 
@@ -47,8 +45,6 @@ export function RoadmapEditor({
     title: "", description: "", detailsText: "",
   });
 
-  const [playlistResults, setPlaylistResults] = React.useState<Record<number, YouTubePlaylistSearchResult[]>>({});
-  const [playlistLoading, setPlaylistLoading] = React.useState<number | null>(null);
   const [addedPlaylists, setAddedPlaylists] = React.useState<{ id: string; title: string }[]>([]);
 
   const [goalSuggestions, setGoalSuggestions] = React.useState<GoalSuggestion[] | null>(null);
@@ -96,10 +92,6 @@ export function RoadmapEditor({
 
   function removeStep(index: number) {
     onSaveSteps(steps.filter((_, i) => i !== index));
-    setPlaylistResults((prev) => {
-      const { [index]: _removed, ...rest } = prev;
-      return rest;
-    });
   }
 
   function addStep() {
@@ -110,24 +102,8 @@ export function RoadmapEditor({
     onSaveSteps(nextSteps);
   }
 
-  async function findPlaylists(index: number, step: RoadmapStep) {
-    if (!user) return;
-    setPlaylistLoading(index);
-    try {
-      const idToken = await user.getIdToken();
-      const query = buildPlaylistSearchQuery(step.title, category.name);
-      const results = await searchPlaylistsForStep(idToken, query, 5);
-      setPlaylistResults((prev) => ({ ...prev, [index]: results }));
-      if (results.length === 0) toast.info("No playlist suggestions found for this step.");
-    } catch (error: any) {
-      toast.error(error?.message || "Unable to search for playlists right now.");
-    } finally {
-      setPlaylistLoading(null);
-    }
-  }
-
-  function trackAddedPlaylist(result: YouTubePlaylistSearchResult) {
-    setAddedPlaylists((prev) => (prev.some((p) => p.id === result.playlistId) ? prev : [...prev, { id: result.playlistId, title: result.title }]));
+  function trackAddedPlaylist(result: { id: string; title: string }) {
+    setAddedPlaylists((prev) => (prev.some((playlist) => playlist.id === result.id) ? prev : [...prev, result]));
   }
 
   async function suggestGoals() {
@@ -272,17 +248,8 @@ export function RoadmapEditor({
                   </button>
                 )}
 
-                <div className="flex flex-wrap items-center gap-2 pt-1">
-                  <Button
-                    size="sm"
-                    variant="ghost"
-                    className="h-7 px-2 text-xs"
-                    onClick={() => void findPlaylists(index, step)}
-                    disabled={playlistLoading === index}
-                  >
-                    <Youtube className="mr-1 h-3.5 w-3.5" />
-                    {playlistLoading === index ? "Searching…" : "Suggested playlists"}
-                  </Button>
+                <div className="flex flex-wrap items-start gap-2 pt-1">
+                  <StepPlaylistSuggestions step={step} categoryName={category.name} onPlaylistAdded={trackAddedPlaylist} />
                   <Button
                     size="sm"
                     variant="ghost"
@@ -295,31 +262,6 @@ export function RoadmapEditor({
                     <Trash2 className="mr-1 h-3.5 w-3.5" /> Remove
                   </Button>
                 </div>
-
-                {playlistResults[index] && playlistResults[index].length > 0 && (
-                  <div className="grid gap-2 pt-1 sm:grid-cols-2">
-                    {playlistResults[index].map((result) => (
-                      <div key={result.playlistId} className="flex gap-2 rounded-md border border-border bg-muted/40 p-2">
-                        {result.thumbnailUrl && (
-                          <div className="relative h-12 w-20 shrink-0 overflow-hidden rounded">
-                            <Image src={result.thumbnailUrl} alt={result.title} fill className="object-cover" sizes="80px" />
-                          </div>
-                        )}
-                        <div className="min-w-0 flex-1">
-                          <p className="truncate text-xs font-medium">{result.title}</p>
-                          <p className="truncate text-[11px] text-muted-foreground">{result.channelTitle}</p>
-                          <Link
-                            href={`/playlists/import?url=${encodeURIComponent(result.playlistUrl)}`}
-                            className="mt-1 inline-block text-[11px] font-medium text-accent hover:underline"
-                            onClick={() => trackAddedPlaylist(result)}
-                          >
-                            Add to my Playlists
-                          </Link>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                )}
               </div>
             </div>
           </div>

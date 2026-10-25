@@ -1,8 +1,9 @@
 import { NextResponse } from "next/server";
 import { adminDb } from "@/lib/server/firebase-admin";
 import { withAiConnection } from "@/lib/server/resolveAiConnection";
-import { generateRoadmapStepsForLevel } from "@/lib/ai/aiService";
+import { generateRoadmapStepsForLevel, type RoadmapPromptReference } from "@/lib/ai/aiService";
 import { sanitizeRoadmapSteps } from "@/lib/roadmapUtils";
+import { getRoadmapReference } from "@/lib/server/developerRoadmap";
 import type { RoadmapLevel } from "@/types";
 import admin from "firebase-admin";
 import { resolveAiLanguage } from "@/lib/server/aiPreferences";
@@ -33,9 +34,27 @@ export const POST = withAuthedRoute(async ({ uid, req }) => {
     const resolvedName = resolvedCategory?.name || categoryName || "Learning topic";
     const targetCategoryId = categoryId || resolvedCategory?.id || resolvedName.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "learning-topic";
 
+    // Ground the plan in developer-roadmap / roadmap.sh data when the
+    // category maps to one of its topics. Best-effort: a missing match or an
+    // unreachable roadmap.sh must never block generation.
+    const reference = await getRoadmapReference(resolvedName, subtopics);
+    const promptReference: RoadmapPromptReference | undefined = reference
+      ? {
+          title: reference.graph.title,
+          sourceUrl: reference.graph.sourceUrl || "https://roadmap.sh",
+          concepts: reference.concepts,
+        }
+      : undefined;
+    const referenceFields = reference
+      ? { referenceSlug: reference.match.slug, referenceTitle: reference.graph.title }
+      : {};
+
     const steps = sanitizeRoadmapSteps(
       await withAiConnection(uid, (apiKey, provider, model) =>
-        generateRoadmapStepsForLevel({ provider, apiKey, model, language }, { categoryName: resolvedName, level, subtopics })
+        generateRoadmapStepsForLevel(
+          { provider, apiKey, model, language },
+          { categoryName: resolvedName, level, subtopics, reference: promptReference },
+        )
       )
     );
 
@@ -64,6 +83,7 @@ export const POST = withAuthedRoute(async ({ uid, req }) => {
       await targetRef.update({
         steps,
         source: "generated",
+        ...referenceFields,
         updatedAt: admin.firestore.FieldValue.serverTimestamp(),
       });
       finalRoadmapId = targetRef.id;
@@ -74,6 +94,7 @@ export const POST = withAuthedRoute(async ({ uid, req }) => {
         steps,
         source: "generated",
         adoptedFromTemplateAt: null,
+        ...referenceFields,
         createdAt: admin.firestore.FieldValue.serverTimestamp(),
         updatedAt: admin.firestore.FieldValue.serverTimestamp(),
       });
@@ -81,7 +102,15 @@ export const POST = withAuthedRoute(async ({ uid, req }) => {
     }
 
     return NextResponse.json(
-      { categoryId: targetCategoryId, categoryName: resolvedName, level, steps, roadmapId: finalRoadmapId },
+      {
+        categoryId: targetCategoryId,
+        categoryName: resolvedName,
+        level,
+        steps,
+        roadmapId: finalRoadmapId,
+        referenceSlug: reference?.match.slug ?? null,
+        referenceTitle: reference?.graph.title ?? null,
+      },
       { headers: { "Cache-Control": "private, no-store" } }
     );
   } catch (err: any) {

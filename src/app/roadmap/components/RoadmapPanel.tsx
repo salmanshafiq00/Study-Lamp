@@ -4,12 +4,13 @@ import * as React from "react";
 import { useAuth } from "@/components/auth/AuthProvider";
 import { Button } from "@/components/ui/button";
 import type { Category, LearningRoadmap, RoadmapLevel, RoadmapStep } from "@/types";
-import { Sparkles, PencilLine, Copy, Eye } from "lucide-react";
+import { Sparkles, PencilLine, Copy, Eye, List, Network } from "lucide-react";
 import { toast } from "sonner";
 import type { AiLanguage } from "@/lib/ai/types";
 import { PromptBuilderPanel } from "./PromptBuilderPanel";
 import { RoadmapView } from "./RoadmapView";
 import { RoadmapEditor } from "./RoadmapEditor";
+import { RoadmapDiagram } from "./RoadmapDiagram";
 
 // ── The single roadmap panel for a category+level. ──
 
@@ -34,6 +35,7 @@ export function RoadmapPanel({
 }) {
   const { user } = useAuth();
   const [mode, setMode] = React.useState<"view" | "customize">("view");
+  const [display, setDisplay] = React.useState<"plan" | "diagram">("plan");
   const [generating, setGenerating] = React.useState(false);
 
   const [promptOpen, setPromptOpen] = React.useState(false);
@@ -92,6 +94,28 @@ export function RoadmapPanel({
           {mode === "view" ? "Suggested roadmap" : "Customize roadmap"}
         </div>
         <div className="flex flex-wrap gap-2">
+          {mode === "view" && hasSteps && (
+            <div className="flex rounded-md border border-border p-0.5" role="group" aria-label="Roadmap view">
+              <Button
+                size="sm"
+                variant={display === "plan" ? "secondary" : "ghost"}
+                className="h-7 px-2 text-xs"
+                aria-pressed={display === "plan"}
+                onClick={() => setDisplay("plan")}
+              >
+                <List className="mr-1 h-3.5 w-3.5" /> Weekly plan
+              </Button>
+              <Button
+                size="sm"
+                variant={display === "diagram" ? "secondary" : "ghost"}
+                className="h-7 px-2 text-xs"
+                aria-pressed={display === "diagram"}
+                onClick={() => setDisplay("diagram")}
+              >
+                <Network className="mr-1 h-3.5 w-3.5" /> Diagram
+              </Button>
+            </div>
+          )}
           <Button size="sm" variant="outline" onClick={() => setMode((m) => (m === "view" ? "customize" : "view"))}>
             {mode === "view" ? (
               <><PencilLine className="mr-1 h-3.5 w-3.5" /> Customize</>
@@ -118,7 +142,11 @@ export function RoadmapPanel({
       )}
 
       {mode === "view" ? (
-        <RoadmapView roadmap={roadmap} onCreateGoal={onCreateGoal} />
+        hasSteps && display === "diagram" ? (
+          <RoadmapDiagram categoryName={category.name} subtopics={subtopics} roadmap={roadmap} />
+        ) : (
+          <RoadmapView roadmap={roadmap} categoryName={category.name} onCreateGoal={onCreateGoal} />
+        )
       ) : (
         <RoadmapEditor
           category={category}

@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { fetchExternalPlaylistPreview } from "@/lib/video-platforms/playlist";
+import { externalPlaylistErrorStatus, fetchExternalPlaylistPreview } from "@/lib/video-platforms/playlist";
 import { withAuthedRoute } from "@/lib/server/routeHelpers";
 import { logServerError } from "@/lib/server/logError";
 
@@ -19,7 +19,7 @@ export const GET = withAuthedRoute(async ({ req }) => {
   }
 
   try {
-    const preview = await fetchExternalPlaylistPreview(sourceUrl);
+    const preview = await fetchExternalPlaylistPreview(sourceUrl, { referer: req.nextUrl.origin });
     return NextResponse.json({
       title: preview.title,
       description: preview.description || "",
@@ -38,6 +38,9 @@ export const GET = withAuthedRoute(async ({ req }) => {
     });
   } catch (err) {
     logServerError("YouTube playlist fetch failed", err);
-    return NextResponse.json({ error: "Failed to fetch playlist" }, { status: 500 });
+    return NextResponse.json(
+      { error: err instanceof Error ? err.message : "Failed to fetch playlist" },
+      { status: externalPlaylistErrorStatus(err) },
+    );
   }
 }, { scope: "youtube-playlist" });

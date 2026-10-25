@@ -5,14 +5,17 @@ import { Button } from "@/components/ui/button";
 import type { LearningRoadmap, RoadmapStep } from "@/types";
 import { Target } from "lucide-react";
 import { GoalFromStepForm } from "./GoalFromStepForm";
+import { StepPlaylistSuggestions } from "./StepPlaylistSuggestions";
 
 // ── Read-only view: description as a summary line, details as bullets. ──
 
 export function RoadmapView({
   roadmap,
+  categoryName,
   onCreateGoal,
 }: {
   roadmap: LearningRoadmap | undefined;
+  categoryName: string;
   onCreateGoal: (step: RoadmapStep, index: number, linkedPlaylists: { id: string; title: string }[]) => Promise<void>;
 }) {
   const [goalStepIndex, setGoalStepIndex] = React.useState<number | null>(null);
@@ -69,15 +72,18 @@ export function RoadmapView({
                   }}
                 />
               ) : (
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  className="mt-2 h-7 px-2 text-xs"
-                  onClick={() => setGoalStepIndex(index)}
-                  data-tour="r-step-goal"
-                >
-                  <Target className="mr-1 h-3.5 w-3.5" /> Set a goal for this step
-                </Button>
+                <div className="mt-2 flex flex-wrap items-start gap-2">
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    className="h-7 px-2 text-xs"
+                    onClick={() => setGoalStepIndex(index)}
+                    data-tour="r-step-goal"
+                  >
+                    <Target className="mr-1 h-3.5 w-3.5" /> Set a goal for this step
+                  </Button>
+                  <StepPlaylistSuggestions step={step} categoryName={categoryName} />
+                </div>
               )}
             </div>
           </div>

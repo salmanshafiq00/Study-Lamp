@@ -206,6 +206,11 @@ export interface LearningRoadmap {
   level: RoadmapLevel;
   steps: RoadmapStep[];
   source?: "template" | "generated" | "imported";
+  /** Set when generation was grounded in a roadmap.sh / developer-roadmap
+   *  topic. Stored so the diagram can reopen the exact same reference graph
+   *  and the UI can credit the source. Older roadmaps simply lack these. */
+  referenceSlug?: string;
+  referenceTitle?: string;
   adoptedFromTemplateAt: Timestamp | null;
   createdAt: Timestamp | null;
   updatedAt: Timestamp | null;

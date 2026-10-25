@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { fetchExternalPlaylistPreview } from "@/lib/video-platforms/playlist";
+import { externalPlaylistErrorStatus, fetchExternalPlaylistPreview } from "@/lib/video-platforms/playlist";
 import { withAuthedRoute } from "@/lib/server/routeHelpers";
 import { logServerError } from "@/lib/server/logError";
 
@@ -19,7 +19,7 @@ export const GET = withAuthedRoute(async ({ req }) => {
   }
 
   try {
-    const preview = await fetchExternalPlaylistPreview(rawUrl);
+    const preview = await fetchExternalPlaylistPreview(rawUrl, { referer: req.nextUrl.origin });
     return NextResponse.json({
       provider: preview.provider,
       title: preview.title,
@@ -40,6 +40,12 @@ export const GET = withAuthedRoute(async ({ req }) => {
     });
   } catch (err) {
     logServerError("External playlist fetch failed", err);
-    return NextResponse.json({ error: "Failed to fetch playlist/collection" }, { status: 500 });
+    // Surface the actionable reason (private playlist, missing API key,
+    // quota exhausted, public-page fallback failed) instead of a generic 500
+    // that leaves the user with no idea what to fix.
+    return NextResponse.json(
+      { error: err instanceof Error ? err.message : "Failed to fetch playlist/collection" },
+      { status: externalPlaylistErrorStatus(err) },
+    );
   }
 }, { scope: "external-playlist" });

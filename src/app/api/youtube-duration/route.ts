@@ -16,7 +16,9 @@ export const GET = withAuthedRoute(async ({ req }) => {
   }
 
   try {
-    const { durations, error } = await fetchYouTubeDurations(ids);
+    // Pass the caller's origin as Referer: API keys restricted by HTTP
+    // referrer reject server-to-server requests that have no Referer header.
+    const { durations, error } = await fetchYouTubeDurations(ids, { referer: req.nextUrl.origin });
     return NextResponse.json({ durations, error });
   } catch (err) {
     logServerError("YouTube duration lookup failed", err);

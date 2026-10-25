@@ -1,6 +1,7 @@
 import type { VideoPlatform } from "@/types";
 import { parseVideoUrl } from "./types";
 import { fetchYouTubeDurations } from "./youtubeDuration";
+import { fetchYouTubePlaylistPage } from "./youtubePlaylistPage";
 import { extractFacebookCollectionId, fetchFacebookCollection } from "./facebookGraph";
 
 // Extend this union (and register a new ExternalPlaylistProvider below) to
@@ -38,7 +39,13 @@ export interface ExternalPlaylistProvider {
   provider: ExternalPlaylistSourceProvider;
   detect(url: string): boolean;
   extractPlaylistId(url: string): string | null;
-  fetchPreview(url: string): Promise<ExternalPlaylistPreview>;
+  fetchPreview(url: string, options?: ExternalPlaylistFetchOptions): Promise<ExternalPlaylistPreview>;
+}
+
+export interface ExternalPlaylistFetchOptions {
+  /** Caller's origin, forwarded to the YouTube Data API as `Referer` because
+   *  keys restricted by HTTP referrer reject requests without one. */
+  referer?: string;
 }
 
 function youtubePlaylistThumbnailUrl(url: string | null | undefined): string | null {
@@ -72,7 +79,7 @@ export class YouTubePlaylistProvider implements ExternalPlaylistProvider {
     return null;
   }
 
-  async fetchPreview(url: string): Promise<ExternalPlaylistPreview> {
+  async fetchPreview(url: string, options: ExternalPlaylistFetchOptions = {}): Promise<ExternalPlaylistPreview> {
     const playlistId = this.extractPlaylistId(url);
     if (!playlistId) {
       throw new Error("This does not look like a valid YouTube playlist URL.");
@@ -80,18 +87,56 @@ export class YouTubePlaylistProvider implements ExternalPlaylistProvider {
 
     const apiKey = process.env.YOUTUBE_API_KEY;
     if (!apiKey) {
-      throw new Error("The YouTube API key is not configured on the server.");
+      return this.fetchViaPublicPage(url, playlistId, "YouTube API key is not configured on the server.");
     }
+
+    try {
+      return await this.fetchViaDataApi(url, playlistId, apiKey, options);
+    } catch (error) {
+      // A missing/expired key, a key restricted to another API, an exhausted
+      // quota, or a temporarily unavailable Data API must not block importing
+      // a public playlist. The page fallback reads the same playlist (title,
+      // videos, and thumbnail durations) without the Data API.
+      if (!isDataApiFallbackError(error)) throw error;
+      return this.fetchViaPublicPage(
+        url,
+        playlistId,
+        error instanceof Error ? error.message : "YouTube Data API request failed.",
+      );
+    }
+  }
+
+  /**
+   * Official Data API path: playlist metadata, every playlistItems page, then
+   * durations from videos.list. This is the primary path whenever a key is
+   * configured.
+   */
+  private async fetchViaDataApi(
+    url: string,
+    playlistId: string,
+    apiKey: string,
+    options: ExternalPlaylistFetchOptions = {},
+  ): Promise<ExternalPlaylistPreview> {
+    // A referrer-restricted key rejects server-to-server calls with no
+    // Referer header, so forward the caller's origin when we have it.
+    const referer = options.referer ? { Referer: options.referer } : undefined;
 
     const metaUrl = new URL("https://www.googleapis.com/youtube/v3/playlists");
     metaUrl.searchParams.set("part", "snippet,status");
     metaUrl.searchParams.set("id", playlistId);
     metaUrl.searchParams.set("key", apiKey);
 
-    const metaRes = await fetch(metaUrl.toString(), { cache: "no-store" });
-    const metaJson = await metaRes.json();
+    const metaRes = await fetch(metaUrl.toString(), {
+      cache: "no-store",
+      headers: referer,
+      signal: AbortSignal.timeout(15000),
+    });
+    const metaJson = await metaRes.json().catch(() => ({}));
     if (!metaRes.ok) {
-      throw new Error(metaJson?.error?.message || "Unable to read playlist metadata.");
+      throw new DataApiFallbackError(
+        metaJson?.error?.message || `YouTube API request failed (${metaRes.status}).`,
+        metaRes.status,
+      );
     }
 
     const playlistItem = metaJson.items?.[0];
@@ -113,10 +158,17 @@ export class YouTubePlaylistProvider implements ExternalPlaylistProvider {
       itemsUrl.searchParams.set("key", apiKey);
       if (pageToken) itemsUrl.searchParams.set("pageToken", pageToken);
 
-      const res = await fetch(itemsUrl.toString(), { cache: "no-store" });
-      const data = await res.json();
+      const res = await fetch(itemsUrl.toString(), {
+        cache: "no-store",
+        headers: referer,
+        signal: AbortSignal.timeout(15000),
+      });
+      const data = await res.json().catch(() => ({}));
       if (!res.ok) {
-        throw new Error(data?.error?.message || "Unable to read playlist videos.");
+        throw new DataApiFallbackError(
+          data?.error?.message || `YouTube API request failed (${res.status}).`,
+          res.status,
+        );
       }
       items.push(...(data.items || []));
       pageToken = data.nextPageToken || "";
@@ -158,7 +210,10 @@ export class YouTubePlaylistProvider implements ExternalPlaylistProvider {
       });
     });
 
-    const { durations } = await fetchYouTubeDurations(validVideos.map((v) => v.youtubeVideoId).filter(Boolean) as string[]);
+    const { durations } = await fetchYouTubeDurations(
+      validVideos.map((v) => v.youtubeVideoId).filter(Boolean) as string[],
+      { referer: options.referer },
+    );
     validVideos.forEach((v) => {
       if (v.youtubeVideoId && durations[v.youtubeVideoId] !== undefined) v.durationSeconds = durations[v.youtubeVideoId];
     });
@@ -174,6 +229,59 @@ export class YouTubePlaylistProvider implements ExternalPlaylistProvider {
       videos: validVideos,
     };
   }
+
+  /** Public-page fallback used when the Data API cannot serve the request. */
+  private async fetchViaPublicPage(
+    url: string,
+    playlistId: string,
+    dataApiReason: string,
+  ): Promise<ExternalPlaylistPreview> {
+    try {
+      const page = await fetchYouTubePlaylistPage(playlistId);
+      return {
+        provider: "youtube",
+        title: page.title,
+        description: page.description,
+        thumbnailUrl: page.thumbnailUrl || null,
+        sourceUrl: url,
+        totalVideos: page.totalVideos,
+        unavailableCount: Math.max(0, page.totalVideos - page.videos.length),
+        videos: page.videos,
+      };
+    } catch (error) {
+      const pageMessage = error instanceof Error ? error.message : "Could not read the public playlist page.";
+      throw new Error(
+        `${dataApiReason} Public playlist fallback also failed: ${pageMessage}`,
+      );
+    }
+  }
+}
+
+class DataApiFallbackError extends Error {
+  status: number;
+
+  constructor(message: string, status: number) {
+    super(message);
+    this.name = "DataApiFallbackError";
+    this.status = status;
+  }
+}
+
+function isDataApiFallbackError(error: unknown): boolean {
+  if (!(error instanceof DataApiFallbackError)) return false;
+  // 400/401/403/429 are the "this key cannot serve requests" family: missing
+  // key, key restricted to another API, API not enabled, quota exhausted.
+  return [400, 401, 403, 429].includes(error.status);
+}
+
+/** HTTP status for a playlist-import failure, so the two import routes can
+ *  surface the real reason instead of collapsing everything into a 500. */
+export function externalPlaylistErrorStatus(error: unknown): number {
+  if (error instanceof DataApiFallbackError && error.status === 404) return 404;
+  const message = error instanceof Error ? error.message : "";
+  if (/not configured on the server/i.test(message)) return 503;
+  if (/valid|private|not found|unavailable|unsupported/i.test(message)) return 400;
+  return 502;
 }
 
 export class FacebookCollectionProvider implements ExternalPlaylistProvider {
@@ -232,10 +340,13 @@ export function detectExternalPlaylistProvider(url: string): ExternalPlaylistPro
   return externalPlaylistProviders.find((provider) => provider.detect(trimmed)) ?? null;
 }
 
-export async function fetchExternalPlaylistPreview(url: string): Promise<ExternalPlaylistPreview> {
+export async function fetchExternalPlaylistPreview(
+  url: string,
+  options: ExternalPlaylistFetchOptions = {},
+): Promise<ExternalPlaylistPreview> {
   const provider = detectExternalPlaylistProvider(url);
   if (!provider) {
     throw new Error("Unsupported playlist URL. Please paste a YouTube playlist or Facebook collection link.");
   }
-  return provider.fetchPreview(url);
+  return provider.fetchPreview(url, options);
 }
