@@ -1,4 +1,5 @@
 import { fetchTranscript } from "youtube-transcript";
+import { logServerError } from "@/lib/server/logError";
 
 const MAX_TRANSCRIPT_CHARS = 60_000;
 
@@ -23,6 +24,7 @@ export async function getYouTubeTranscript(videoId: string): Promise<string> {
     if (!transcript) throw new TranscriptUnavailableError();
     return transcript.slice(0, MAX_TRANSCRIPT_CHARS);
   } catch (error) {
+    logServerError("YouTube transcript failed", error)
     if (error instanceof TranscriptUnavailableError) throw error;
     throw new TranscriptUnavailableError();
   }
