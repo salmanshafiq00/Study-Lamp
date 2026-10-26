@@ -24,8 +24,13 @@ export async function getYouTubeTranscript(videoId: string): Promise<string> {
     if (!transcript) throw new TranscriptUnavailableError();
     return transcript.slice(0, MAX_TRANSCRIPT_CHARS);
   } catch (error) {
-    logServerError("YouTube transcript failed", error)
     if (error instanceof TranscriptUnavailableError) throw error;
+    logServerError("YouTube transcript fetch failed", error);
+    console.error(
+      "YouTube transcript detail:",
+      error instanceof Error ? error.message.slice(0, 200) : "non-error",
+      error instanceof Error && error.cause instanceof Error ? error.cause.message.slice(0, 200) : ""
+    );
     throw new TranscriptUnavailableError();
   }
 }
