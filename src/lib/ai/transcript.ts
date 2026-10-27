@@ -31,6 +31,23 @@ export async function getYouTubeTranscript(videoId: string): Promise<string> {
       error instanceof Error ? error.message.slice(0, 200) : "non-error",
       error instanceof Error && error.cause instanceof Error ? error.cause.message.slice(0, 200) : ""
     );
+    try {
+      const res = await fetch(`https://www.youtube.com/watch?v=${videoId}`, {
+        headers: { "Accept-Language": "en-US,en;q=0.9" },
+      });
+      const html = await res.text();
+      console.error(
+        "YT diag",
+        res.status,
+        html.length,
+        "captions:", html.includes('"captions":'),
+        "recaptcha:", html.includes("g-recaptcha"),
+        "consent:", html.includes("consent.youtube.com"),
+        "botcheck:", /confirm you.re not a bot/i.test(html)
+      );
+    } catch {
+      console.error("YT diag fetch failed");
+    }
     throw new TranscriptUnavailableError();
   }
 }
