@@ -1,6 +1,7 @@
 import { AiServiceError } from "../errors";
 import type { AiConnectionCredentials, AiGenerateOptions } from "../types";
 import { resolveAiGenerateOptions } from "../generateOptions";
+import { MAX_TRANSCRIPT_CHARS } from "../transcriptLimits";
 
 /**
  * Gemini adapter. This is the ONLY file in the codebase that should know:
@@ -18,6 +19,15 @@ import { resolveAiGenerateOptions } from "../generateOptions";
 const BASE_URL = "https://generativelanguage.googleapis.com/v1beta/models";
 const GENERATE_TIMEOUT_MS = 30_000;
 const VALIDATE_TIMEOUT_MS = 10_000;
+// Keep well below both route maxDuration values (60 s) so the summary/quiz
+// generation call still has budget after transcription finishes.
+const TRANSCRIBE_TIMEOUT_MS = 35_000;
+const MAX_TRANSCRIPT_OUTPUT_TOKENS = 16_384;
+const YOUTUBE_VIDEO_ID_PATTERN = /^[A-Za-z0-9_-]{11}$/;
+
+export const YOUTUBE_TRANSCRIPT_PROMPT =
+  "Transcribe the spoken words in this video as plain text. Write the transcript in the language that is spoken. " +
+  "Do not add commentary, headings, timestamps, or speaker labels.";
 
 async function withTimeout<T>(ms: number, run: (signal: AbortSignal) => Promise<T>): Promise<T> {
   const controller = new AbortController();
@@ -98,6 +108,24 @@ export function isGemini25Model(model: string): boolean {
   return model.includes("gemini-2.5");
 }
 
+/** Shared generationConfig builder so every Gemini call gets the same thinking handling. */
+function buildGenerationConfig(
+  credentials: AiConnectionCredentials,
+  options: AiGenerateOptions | undefined,
+  includeThinkingConfig: boolean,
+) {
+  const settings = resolveAiGenerateOptions(options);
+  return {
+    temperature: settings.temperature,
+    maxOutputTokens: settings.maxOutputTokens,
+    // Gemini's JSON mode accepts array roots too.
+    ...(settings.json ? { responseMimeType: "application/json" } : {}),
+    ...(includeThinkingConfig && settings.disableThinking && isGemini25Model(credentials.model)
+      ? { thinkingConfig: { thinkingBudget: 0 } }
+      : {}),
+  };
+}
+
 /** Request body for generateContent. `thinkingConfig` is only added for 2.5 models when thinking should be off. */
 export function buildGeminiRequestBody(
   credentials: AiConnectionCredentials,
@@ -105,18 +133,44 @@ export function buildGeminiRequestBody(
   options: AiGenerateOptions | undefined,
   includeThinkingConfig = true,
 ) {
-  const settings = resolveAiGenerateOptions(options);
   return {
     contents: [{ role: "user", parts: [{ text: prompt }] }],
-    generationConfig: {
-      temperature: settings.temperature,
-      maxOutputTokens: settings.maxOutputTokens,
-      // Gemini's JSON mode accepts array roots too.
-      ...(settings.json ? { responseMimeType: "application/json" } : {}),
-      ...(includeThinkingConfig && settings.disableThinking && isGemini25Model(credentials.model)
-        ? { thinkingConfig: { thinkingBudget: 0 } }
-        : {}),
-    },
+    generationConfig: buildGenerationConfig(credentials, options, includeThinkingConfig),
+  };
+}
+
+export function isValidYouTubeVideoId(videoId: string): boolean {
+  return YOUTUBE_VIDEO_ID_PATTERN.test(videoId);
+}
+
+/**
+ * Pure request body for the Gemini-from-URL transcript fallback. The file URI
+ * is exactly the public watch URL, and no API key is ever part of the body.
+ */
+export function buildYouTubeTranscriptRequestBody(
+  credentials: AiConnectionCredentials,
+  videoId: string,
+  includeThinkingConfig = true,
+) {
+  if (!isValidYouTubeVideoId(videoId)) {
+    throw new AiServiceError("invalid_request", "Invalid YouTube video id.");
+  }
+
+  return {
+    contents: [
+      {
+        role: "user",
+        parts: [
+          { fileData: { fileUri: `https://www.youtube.com/watch?v=${videoId}` } },
+          { text: YOUTUBE_TRANSCRIPT_PROMPT },
+        ],
+      },
+    ],
+    generationConfig: buildGenerationConfig(
+      credentials,
+      { maxOutputTokens: MAX_TRANSCRIPT_OUTPUT_TOKENS, temperature: 0, disableThinking: true },
+      includeThinkingConfig,
+    ),
   };
 }
 
@@ -158,6 +212,68 @@ export async function generateWithGemini(
     throw translateHttpError(res.status, body);
   }
   return parseGenerateContentResponse(body);
+}
+
+/**
+ * Free workaround for YouTube blocking datacenter IPs: Gemini fetches the
+ * public video URL itself and transcribes the audio. This is a preview
+ * feature (public videos only) and must never be used for non-Gemini
+ * providers. Errors are already mapped to AiServiceError, so callers can turn
+ * any failure into "no transcript".
+ */
+export async function transcribeYouTubeWithGemini(
+  credentials: AiConnectionCredentials,
+  videoId: string,
+  signal?: AbortSignal,
+): Promise<string> {
+  // Validate before any network call so a malformed id never reaches Google.
+  buildYouTubeTranscriptRequestBody(credentials, videoId);
+
+  const url = `${BASE_URL}/${encodeURIComponent(credentials.model)}:generateContent`;
+
+  async function send(includeThinkingConfig: boolean): Promise<{ res: Response; body: unknown }> {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), TRANSCRIBE_TIMEOUT_MS);
+    const forwardAbort = () => controller.abort();
+    if (signal) {
+      if (signal.aborted) controller.abort();
+      else signal.addEventListener("abort", forwardAbort, { once: true });
+    }
+
+    try {
+      let res: Response;
+      try {
+        res = await fetch(url, {
+          method: "POST",
+          signal: controller.signal,
+          headers: { "Content-Type": "application/json", "x-goog-api-key": credentials.apiKey },
+          body: JSON.stringify(buildYouTubeTranscriptRequestBody(credentials, videoId, includeThinkingConfig)),
+        });
+      } catch (err: unknown) {
+        if (err instanceof Error && err.name === "AbortError") {
+          throw new AiServiceError("timeout", "Timed out waiting for Gemini.");
+        }
+        throw new AiServiceError("network", "Could not reach Gemini.");
+      }
+      return { res, body: await res.json().catch(() => null) };
+    } finally {
+      clearTimeout(timer);
+      signal?.removeEventListener("abort", forwardAbort);
+    }
+  }
+
+  let { res, body } = await send(true);
+  // Some 2.5 models cannot switch thinking off and answer 400 about the
+  // thinking budget; retry once without thinkingConfig, same as generation.
+  if (
+    res.status === 400 &&
+    /thinking/i.test(String(extractGeminiMessage(body) ?? "")) &&
+    isGemini25Model(credentials.model)
+  ) {
+    ({ res, body } = await send(false));
+  }
+  if (!res.ok) throw translateHttpError(res.status, body);
+  return parseGenerateContentResponse(body).slice(0, MAX_TRANSCRIPT_CHARS);
 }
 
 /**

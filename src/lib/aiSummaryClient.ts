@@ -3,10 +3,11 @@
 // one function: unlike AI connections, there's only one thing a video page
 // needs to do here.
 import type { AiLanguage } from "@/lib/ai/types";
+import { ApiRequestError, apiErrorFromResponse, readApiResponseBody } from "@/lib/apiError";
 
-async function parseOrThrow(res: Response): Promise<any> {
-  const data = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(data.error || `Request failed (${res.status})`);
+async function parseOrThrow(res: Response): Promise<Record<string, unknown>> {
+  const data = await readApiResponseBody(res);
+  if (!res.ok) throw apiErrorFromResponse(res, data);
   return data;
 }
 
@@ -31,5 +32,8 @@ export async function generateStarterSummary(
     body: JSON.stringify(input),
   });
   const data = await parseOrThrow(res);
-  return data.summary as string;
+  if (typeof data.summary !== "string") {
+    throw new ApiRequestError("Something went wrong generating a summary.");
+  }
+  return data.summary;
 }

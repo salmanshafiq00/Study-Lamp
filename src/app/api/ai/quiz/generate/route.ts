@@ -1,8 +1,11 @@
 import { NextResponse } from "next/server";
 import { generateVideoQuiz } from "@/lib/ai/aiService";
-import { resolveTranscript } from "@/lib/ai/universalTranscript";
-import { getAiPreferences, resolveAiLanguage } from "@/lib/server/aiPreferences";
-import { withAiConnection } from "@/lib/server/resolveAiConnection";
+import { resolveTranscriptDetailed, type TranscriptFailureReason } from "@/lib/ai/universalTranscript";
+import { transcriptErrorInfo } from "@/lib/ai/transcriptFailure";
+import { AiServiceError } from "@/lib/ai/errors";
+import { transcribeYouTubeWithGemini } from "@/lib/ai/providers/gemini";
+import { resolveAiLanguage } from "@/lib/server/aiPreferences";
+import { getPreferredAiProvider, withAiConnection } from "@/lib/server/resolveAiConnection";
 import { logServerError } from "@/lib/server/logError";
 import { buildSourceHash } from "@/lib/server/sourceHash";
 import {
@@ -62,28 +65,48 @@ export const POST = withAuthedRoute(async ({ uid, req }) => {
   // whenever a summary existed, even when a transcript was available —
   // meaning quizzes silently ignored transcript detail the moment a
   // summary was saved. Resolve the transcript FIRST and unconditionally
-  // (any platform, via resolveTranscript — not just YouTube), and only
-  // fall back to the saved summary when no transcript exists at all.
+  // (any platform, via resolveTranscriptDetailed — not just YouTube), and
+  // only fall back to the saved summary when no transcript exists at all.
   // buildQuizPrompt's own instructions also prefer transcript > summary,
   // so passing both through is safe either way.
-  let transcript: string | null;
+  let transcript: string | null = null;
+  let transcriptFailureReason: TranscriptFailureReason | null = null;
   try {
-    transcript = await resolveTranscript({ youtubeVideoId, manualTranscript });
+    const preferredProvider = await getPreferredAiProvider(uid).catch(() => null);
+    const result = await resolveTranscriptDetailed(
+      { youtubeVideoId, manualTranscript },
+      preferredProvider === "gemini"
+        ? {
+            geminiFallback: (vid: string) =>
+              withAiConnection(uid, async (apiKey, provider, model) => {
+                if (provider !== "gemini") {
+                  throw new AiServiceError("unsupported_provider", "Transcript fallback is only available for Gemini.");
+                }
+                // Rethrow every transcription error as "unknown" so withAiConnection
+                // never marks the connection as failed/invalid or burns system quota
+                // due to a transcript-specific problem (e.g. Gemini can't access the
+                // video URL). The "unknown" code is not in FALLBACK_CODES, so the
+                // loop exits immediately without trying the next connection.
+                try {
+                  return await transcribeYouTubeWithGemini({ provider, apiKey, model }, vid);
+                } catch (err) {
+                  if (err instanceof AiServiceError && err.code === "unknown") throw err;
+                  throw new AiServiceError("unknown", err instanceof Error ? err.message : "Transcription failed.");
+                }
+              }),
+          }
+        : undefined
+    );
+    transcript = result.text;
+    transcriptFailureReason = result.failureReason;
   } catch (error) {
     logServerError("Unexpected error resolving a transcript for quiz generation", error);
-    return NextResponse.json({ error: "Unable to retrieve a transcript for this video." }, { status: 502 });
+    transcriptFailureReason = "unknown";
   }
 
   if (!transcript && !summary?.trim()) {
-    const preferences = await getAiPreferences(uid).catch(() => ({ speechToTextEnabled: false }));
-    return NextResponse.json(
-      {
-        error: preferences.speechToTextEnabled
-          ? "No transcript is available. Speech-to-text fallback is enabled, but no transcription service is configured yet."
-          : "No transcript or captions are available. Paste or upload a transcript for this video, or write a summary, before generating a quiz.",
-      },
-      { status: 422 }
-    );
+    const info = transcriptErrorInfo(transcriptFailureReason);
+    return NextResponse.json({ error: info.message, code: info.code }, { status: 422 });
   }
 
   // Source hash now includes the transcript (Phase 5) so a changed
@@ -126,7 +149,7 @@ export const POST = withAuthedRoute(async ({ uid, req }) => {
     }
 
     return NextResponse.json({ questions }, { headers: { "Cache-Control": "private, no-store" } });
-  } catch (err: any) {
+  } catch (err: unknown) {
     return aiErrorResponse(err, { fallbackMessage: "Something went wrong generating a quiz.", logLabel: "Unexpected error generating AI quiz" });
   }
 });

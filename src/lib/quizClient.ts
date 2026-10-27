@@ -1,6 +1,7 @@
 import type { QuizQuestion } from "@/types";
 import type { AiLanguage } from "@/lib/ai/types";
 import { toast } from "sonner";
+import { apiErrorFromResponse, readApiResponseBody } from "@/lib/apiError";
 import { buildQuizAttemptBody, type QuizAttemptPayload } from "@/lib/quizAttempt";
 
 export interface GenerateQuizInput {
@@ -29,9 +30,9 @@ export async function generateVideoQuizForCurrentVideo(
     },
     body: JSON.stringify(input),
   });
-  const data = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(data?.error || `Quiz generation failed (${res.status})`);
-  return { questions: Array.isArray(data.questions) ? data.questions : [] };
+  const data = await readApiResponseBody(res);
+  if (!res.ok) throw apiErrorFromResponse(res, data);
+  return { questions: Array.isArray(data.questions) ? (data.questions as QuizQuestion[]) : [] };
 }
 
 /**

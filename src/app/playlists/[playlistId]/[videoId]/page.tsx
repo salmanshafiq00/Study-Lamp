@@ -29,6 +29,7 @@ import { getTranscript, saveTranscript } from "@/lib/firestore/transcripts";
 import { addBookmark, listBookmarks, removeBookmark } from "@/lib/firestore/bookmarks";
 import { generateStarterSummary } from "@/lib/aiSummaryClient";
 import { generateVideoQuizForCurrentVideo, submitQuizAttempt } from "@/lib/quizClient";
+import { getApiErrorCode, getApiErrorMessage } from "@/lib/apiError";
 import { useDebouncedCallback } from "@/hooks/useDebouncedCallback";
 import { formatDuration } from "@/lib/utils";
 import { toSummaryHtml } from "@/lib/summaryHtml";
@@ -74,6 +75,8 @@ function PersonalVideoContent() {
   const [generatingSummary, setGeneratingSummary] = React.useState(false);
   const [transcript, setTranscript] = React.useState("");
   const [transcriptSaving, setTranscriptSaving] = React.useState(false);
+  const [activeTab, setActiveTab] = React.useState("summary");
+  const [transcriptPrompt, setTranscriptPrompt] = React.useState<string | null>(null);
   const [quizQuestions, setQuizQuestions] = React.useState<QuizQuestion[]>([]);
   const [quizLoading, setQuizLoading] = React.useState(false);
   const [selectedAnswers, setSelectedAnswers] = React.useState<Record<string, string>>({});
@@ -87,6 +90,7 @@ function PersonalVideoContent() {
   const [viewportWidth, setViewportWidth] = React.useState<number>(0);
   const lastProgressSaveRef = React.useRef(0);
   const previousProgressRef = React.useRef(0);
+  const transcriptInputRef = React.useRef<HTMLTextAreaElement>(null);
 
   React.useEffect(() => {
     const updateWidth = () => setViewportWidth(window.innerWidth);
@@ -107,6 +111,8 @@ function PersonalVideoContent() {
   React.useEffect(() => {
     previousProgressRef.current = 0;
     lastProgressSaveRef.current = Date.now();
+    setActiveTab("summary");
+    setTranscriptPrompt(null);
   }, [videoId]);
 
   const load = React.useCallback(async () => {
@@ -145,6 +151,7 @@ function PersonalVideoContent() {
     setTranscriptSaving(true);
     try {
       await saveTranscript(ownerId, noteKey(videoId), transcript);
+      setTranscriptPrompt(null);
       toast.success(transcript.trim() ? "Transcript saved" : "Transcript cleared");
     } finally {
       setTranscriptSaving(false);
@@ -183,6 +190,16 @@ function PersonalVideoContent() {
     }
   }
 
+  function revealTranscriptPrompt(code: string | undefined, message: string) {
+    if (!code?.startsWith("transcript_")) return;
+    setTranscriptPrompt(message);
+    setActiveTab("transcript");
+    window.setTimeout(() => {
+      transcriptInputRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+      transcriptInputRef.current?.focus({ preventScroll: true });
+    }, 50);
+  }
+
   async function handleGenerateQuiz() {
     if (!user || isViewingOther || !video || quizLoading || !languageReady) return;
     setQuizLoading(true);
@@ -206,8 +223,10 @@ function PersonalVideoContent() {
       if (!response.questions?.length) {
         toast.error("No quiz questions were generated.");
       }
-    } catch (error: any) {
-      toast.error(error?.message || "Couldn't generate a quiz right now.");
+    } catch (error) {
+      const message = getApiErrorMessage(error, "Couldn't generate a quiz right now.");
+      toast.error(message);
+      revealTranscriptPrompt(getApiErrorCode(error), message);
     } finally {
       setQuizLoading(false);
     }
@@ -271,8 +290,10 @@ function PersonalVideoContent() {
       setSummary(draftHtml);
       await saveSummary(ownerId, noteKey(videoId), draftHtml);
       toast.success("Starter summary generated — feel free to edit it.");
-    } catch (error: any) {
-      toast.error(error?.message || "Couldn't generate a summary right now.");
+    } catch (error) {
+      const message = getApiErrorMessage(error, "Couldn't generate a summary right now.");
+      toast.error(message);
+      revealTranscriptPrompt(getApiErrorCode(error), message);
     } finally {
       setGeneratingSummary(false);
     }
@@ -463,10 +484,12 @@ function PersonalVideoContent() {
               </div>
             </div>
 
-            <Tabs defaultValue="summary">
+            <Tabs value={activeTab} onValueChange={setActiveTab}>
               <TabsList data-tour="w-tabs">
                 <TabsTrigger value="summary">Summary</TabsTrigger>
-                {!video?.youtubeVideoId && !isViewingOther && <TabsTrigger value="transcript">Transcript</TabsTrigger>}
+                {!isViewingOther && (!video?.youtubeVideoId || transcriptPrompt !== null) && (
+                  <TabsTrigger value="transcript">Transcript</TabsTrigger>
+                )}
                 <TabsTrigger value="notes">Notes</TabsTrigger>
                 <TabsTrigger value="quiz">Quiz</TabsTrigger>
                 <TabsTrigger value="bookmarks">Bookmarks</TabsTrigger>
@@ -502,13 +525,19 @@ function PersonalVideoContent() {
                 )}
               </TabsContent>
 
-              {!video?.youtubeVideoId && !isViewingOther && (
-                <TabsContent value="transcript">
+              {!isViewingOther && (!video?.youtubeVideoId || transcriptPrompt !== null) && (
+                <TabsContent value="transcript" className="space-y-3">
+                  {transcriptPrompt !== null && (
+                    <p className="rounded-md border border-destructive/40 bg-destructive/5 p-3 text-sm text-destructive">
+                      {transcriptPrompt}
+                    </p>
+                  )}
                   <TranscriptInput
                     value={transcript}
                     onChange={setTranscript}
                     onSave={handleSaveTranscript}
                     saving={transcriptSaving}
+                    textareaRef={transcriptInputRef}
                   />
                 </TabsContent>
               )}

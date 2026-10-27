@@ -22,11 +22,13 @@ export function TranscriptInput({
   onChange,
   onSave,
   saving,
+  textareaRef,
 }: {
   value: string;
   onChange: (text: string) => void;
   onSave: () => void;
   saving?: boolean;
+  textareaRef?: React.RefObject<HTMLTextAreaElement>;
 }) {
   const fileInputRef = React.useRef<HTMLInputElement>(null);
 
@@ -55,6 +57,7 @@ export function TranscriptInput({
   return (
     <div className="space-y-3">
       <Textarea
+        ref={textareaRef}
         value={value}
         onChange={(e) => onChange(e.target.value)}
         placeholder="Paste this video's transcript here, or upload an .srt/.vtt file below…"
@@ -83,8 +86,8 @@ export function TranscriptInput({
         />
       </div>
       <p className="text-xs text-muted-foreground">
-        No official captions were found for this video. Provide a transcript to unlock AI summaries and quizzes
-        grounded in the actual content — private to you.
+        Paste or upload a transcript to unlock AI summaries and quizzes grounded in the actual
+        content — private to you.
       </p>
     </div>
   );

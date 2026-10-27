@@ -48,8 +48,7 @@ export async function withAiConnection<T>(
   uid: string,
   attempt: (apiKey: string, provider: AiProvider, model: string) => Promise<T>,
   deps: Partial<ResolveAiConnectionDeps> = {}
-): Promise<T> {
-  const resolved = { ...defaultDeps, ...deps };
+): Promise<T> {  const resolved = { ...defaultDeps, ...deps };
   const personalTried = new Set<string>();
   const systemTried = new Set<string>();
   let lastPersonalError: AiServiceError | null = null;
@@ -119,6 +118,24 @@ export async function withAiConnection<T>(
       }
     }
   }
+}
+
+/**
+ * Provider that withAiConnection would try first, resolved WITHOUT spending
+ * quota or recording a connection result. The summary/quiz routes use this to
+ * decide whether the free Gemini-from-URL transcript fallback is available
+ * before they need credentials; the actual credentials are still decrypted
+ * inside withAiConnection and handed only to the Gemini transcriber.
+ */
+export async function getPreferredAiProvider(uid: string): Promise<AiProvider | null> {
+  const quota = await getOrInitQuota(uid).catch(() => null);
+  if (quota && quota.systemAiEnabled === false) return null;
+
+  const personal = await getPersonalConnectionRaw(uid).catch(() => null);
+  if (personal) return personal.provider;
+
+  const system = await getSystemConnectionRaw().catch(() => null);
+  return system?.provider ?? null;
 }
 
 async function runAttemptWithConnection<T>(
